@@ -53,28 +53,98 @@ function estimateWalkMinutes(distance: number): number {
   return Math.max(1, Math.round(distance / 80));
 }
 
-function amenityDescription(type: AmenityType, tags: Record<string, string>, rating: number): string {
-  const open = tags.opening_hours ? `Hours: ${tags.opening_hours}.` : "";
-  const access = tags.wheelchair === "yes" ? "Wheelchair accessible." : "";
-  const quality =
-    rating >= 80 ? "Strong nearby option." : rating >= 65 ? "Solid nearby option." : "Decent backup option.";
-  switch (type) {
-    case "grocery":
-      return `${quality} Useful for weekly essentials. ${open} ${access}`.trim();
-    case "pharmacy":
-      return `${quality} Convenient for prescriptions and urgent needs. ${open} ${access}`.trim();
-    case "healthcare":
-      return `${quality} Nearby care access. ${open} ${access}`.trim();
-    case "transit":
-      return `${quality} Helps reduce commute friction.`.trim();
-    case "park":
-      return `${quality} Adds outdoor and activity access.`.trim();
-    case "restaurant":
-    case "cafe":
-      return `${quality} Good day-to-day food access. ${open}`.trim();
-    default:
-      return `${quality} Nearby local amenity.`.trim();
+function hashString(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
+  return Math.abs(hash >>> 0);
+}
+
+function pickVariant(options: string[], seed: string): string {
+  if (options.length === 0) return "";
+  return options[hashString(seed) % options.length];
+}
+
+function qualityLabel(rating: number): string {
+  if (rating >= 85) return "Top pick";
+  if (rating >= 72) return "Great fit";
+  if (rating >= 58) return "Solid option";
+  return "Useful backup";
+}
+
+function amenityDescription(params: {
+  type: AmenityType;
+  tags: Record<string, string>;
+  rating: number;
+  distance: number;
+  walkMinutes: number;
+  isSmallBusiness: boolean;
+  seed: string;
+}): string {
+  const { type, tags, rating, distance, walkMinutes, isSmallBusiness, seed } = params;
+
+  const quality = qualityLabel(rating);
+  const hours = tags.opening_hours ? `Hours: ${tags.opening_hours}.` : "";
+  const wheelchair = tags.wheelchair === "yes" ? "Wheelchair accessible." : "";
+  const locality = isSmallBusiness ? "Independent local spot." : "";
+  const transitHint =
+    walkMinutes <= 5 ? "Quick stop before/after work." : "Still realistic for regular routines.";
+
+  const templatesByType: Record<AmenityType, string[]> = {
+    grocery: [
+      `${quality}: about ${distance}m away (${walkMinutes} min). Easy for weekday restocks and quick essentials.`,
+      `${quality}: ${walkMinutes}-minute walk for groceries, useful for cutting delivery dependence.`,
+      `${quality}: nearby grocery access helps keep day-to-day costs and errands predictable.`,
+      `${quality}: practical for meal prep runs and top-up trips during the week.`,
+    ],
+    pharmacy: [
+      `${quality}: ${walkMinutes}-minute pharmacy access can reduce friction for prescriptions and urgent items.`,
+      `${quality}: close enough (${distance}m) for same-day health errands when plans change.`,
+      `${quality}: reliable pharmacy proximity for routine meds and quick personal-care runs.`,
+      `${quality}: good coverage for health essentials without long detours.`,
+    ],
+    healthcare: [
+      `${quality}: nearby care option (${walkMinutes} min) improves access when timing matters.`,
+      `${quality}: healthcare access within ${distance}m supports better day-to-day resilience.`,
+      `${quality}: practical medical access for non-emergency visits and follow-ups.`,
+      `${quality}: good to have close-by care in your neighborhood routine.`,
+    ],
+    transit: [
+      `${quality}: transit is ${walkMinutes} minutes away. ${transitHint}`,
+      `${quality}: ${distance}m to transit helps keep commute variability lower.`,
+      `${quality}: strong transit adjacency for flexible routing across the city.`,
+      `${quality}: nearby stop supports easier no-car days and mixed-mode commutes.`,
+    ],
+    park: [
+      `${quality}: park access in about ${walkMinutes} minutes adds recovery and activity options.`,
+      `${quality}: nearby green space supports daily walks and weekend downtime.`,
+      `${quality}: useful for outdoor breaks without planning a long trip.`,
+      `${quality}: park proximity helps balance dense city living with open space access.`,
+    ],
+    restaurant: [
+      `${quality}: food options in a ${walkMinutes}-minute walk range for quick meals and social plans.`,
+      `${quality}: strong nearby dining coverage (${distance}m) for flexible weeknight choices.`,
+      `${quality}: practical restaurant access when you need low-friction meal options.`,
+      `${quality}: nearby dining cluster improves convenience for both takeout and dine-in.`,
+    ],
+    cafe: [
+      `${quality}: cafe access within ${walkMinutes} minutes for coffee, quick meetings, or remote work breaks.`,
+      `${quality}: nearby cafe option adds third-space flexibility to your routine.`,
+      `${quality}: strong coffee/tea convenience with minimal detour from home.`,
+      `${quality}: practical for short focus sessions or casual meetups nearby.`,
+    ],
+    other: [
+      `${quality}: nearby amenity access (${distance}m) adds useful day-to-day flexibility.`,
+      `${quality}: close-by local service that can reduce small weekly detours.`,
+      `${quality}: convenient neighborhood option for routine errands.`,
+      `${quality}: good supplemental amenity coverage around this listing.`,
+    ],
+  };
+
+  const main = pickVariant(templatesByType[type], `${seed}:${type}:${rating}:${distance}`);
+  return `${main} ${locality} ${hours} ${wheelchair}`.replace(/\s+/g, " ").trim();
 }
 
 function buildAddress(tags: Record<string, string>): string | null {
@@ -145,6 +215,10 @@ export async function GET(request: Request) {
       const { type, weight } = classify(element.tags);
       const distance = toMeters(lat, lng, element.lat, element.lon);
       const rating = computeAmenityRating(weight, distance, radius);
+      const walkMinutes = estimateWalkMinutes(distance);
+      const isSmallBusiness = Boolean(
+        type === "cafe" || type === "restaurant" || element.tags.shop === "convenience",
+      );
       rawScore += weight;
 
       const amenity: Amenity = {
@@ -154,13 +228,19 @@ export async function GET(request: Request) {
         coords: [element.lat, element.lon],
         distance,
         rating,
-        walkMinutes: estimateWalkMinutes(distance),
+        walkMinutes,
         address: buildAddress(element.tags),
-        description: amenityDescription(type, element.tags, rating),
+        description: amenityDescription({
+          type,
+          tags: element.tags,
+          rating,
+          distance,
+          walkMinutes,
+          isSmallBusiness,
+          seed: `${element.id}:${name}:${lat.toFixed(4)}:${lng.toFixed(4)}`,
+        }),
         source: "OpenStreetMap (Overpass)",
-        isSmallBusiness: Boolean(
-          type === "cafe" || type === "restaurant" || element.tags.shop === "convenience",
-        ),
+        isSmallBusiness,
       };
 
       const existing = byName.get(name);
