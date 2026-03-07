@@ -19,6 +19,15 @@ import { SpiderPrefsProvider, useSpiderPrefs, type SpiderAxes } from "@/lib/spid
 
 type SortMode = "recommended" | "price-asc" | "price-desc" | "score-desc";
 
+type LiveAmenity = {
+  id: string;
+  name: string;
+  type: string;
+  distance: number;
+  coords: [number, number];
+  description?: string;
+};
+
 // ── Map overlay: My Preferences widget ───────────────────────────────────────
 
 function pxy(angleDeg: number, r: number, cx: number, cy: number) {
@@ -296,6 +305,7 @@ export default function HeroPage() {
   const [filter, setFilter] = useState<FilterType>("All");
   const [sort, setSort] = useState<SortMode>("recommended");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [liveAmenities, setLiveAmenities] = useState<LiveAmenity[]>([]);
   const { isSaved, toggleSave, savedIds, isLoggedIn } = useSavedListings();
 
   useEffect(() => {
@@ -352,6 +362,30 @@ export default function HeroPage() {
     () => (selectedId ? (listings.find((l) => l.id === selectedId) ?? null) : null),
     [selectedId, listings]
   );
+
+  useEffect(() => {
+    if (!selectedListing) {
+      setLiveAmenities([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    fetch(`/api/vitality?lat=${selectedListing.lat}&lng=${selectedListing.lng}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Failed to load vitality");
+        const payload = (await response.json()) as { amenities?: LiveAmenity[] };
+        setLiveAmenities(Array.isArray(payload.amenities) ? payload.amenities : []);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        console.error(error);
+        setLiveAmenities([]);
+      });
+
+    return () => controller.abort();
+  }, [selectedListing]);
 
   return (
     <SpiderPrefsProvider>
@@ -489,6 +523,7 @@ export default function HeroPage() {
             listings={filteredListings}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            selectedAmenities={liveAmenities}
           />
           <PrefsWidget />
         </div>
