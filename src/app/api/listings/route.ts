@@ -3,32 +3,37 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Listing, ScoreBand } from "@/lib/avenuex-data";
 
-// ── Types for the raw livable-data JSON ──────────────────────────────────────
+interface NearbyPlace {
+  name: string;
+  address: string | null;
+  distance_meters: number | null;
+  categories: string[];
+  place_id?: string | null;
+}
 
 interface NearbyBucket {
   label: string;
   source: string;
   radius_meters: number;
   count: number;
-  places: {
-    name: string;
-    address: string | null;
-    distance_meters: number | null;
-    categories: string[];
-  }[];
+  places: NearbyPlace[];
+}
+
+interface CrimeData {
+  neighbourhood_name: string;
+  year: number;
+  composite_rate_per_100k: number | null;
 }
 
 interface RawListing {
   listing_id: string;
-  url: string | null;
   title: string | null;
   location: string | null;
   price: string | null;
   photo: string | null;
   lat: number | null;
   lng: number | null;
-  geocode_display_name: string | null;
-  geocode_found: boolean;
+  crime?: CrimeData | null;
   nearby?: {
     schools?: NearbyBucket;
     groceries?: NearbyBucket;
@@ -39,8 +44,6 @@ interface RawListing {
     transit?: NearbyBucket;
   };
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function parsePrice(raw: string | null | undefined): number {
   if (!raw) return 0;
@@ -63,12 +66,12 @@ function extractAddress(location: string | null | undefined): string {
 }
 
 function bucketScore(count: number | undefined): number {
-  return Math.round(Math.min(count ?? 0, 5) / 5 * 100);
+  return Math.round((Math.min(count ?? 0, 5) / 5) * 100);
 }
 
 function deriveBand(score: number): ScoreBand {
-  if (score >= 70) return "great";
-  if (score >= 45) return "medium";
+  if (score >= 75) return "great";
+  if (score >= 55) return "medium";
   return "warning";
 }
 
@@ -84,10 +87,47 @@ function formatShortPrice(rent: number): string {
 }
 
 function computeIncomeNeeded(monthlyRent: number): number {
-  return Math.round((monthlyRent / 0.3) * 12 / 1000) * 1000;
+  return Math.round((((monthlyRent / 0.3) * 12) / 1000)) * 1000;
 }
 
-// ── Data loading ─────────────────────────────────────────────────────────────
+function computeSafetyScore(crimeRatePer100k: number | null | undefined): number {
+  if (!Number.isFinite(crimeRatePer100k)) return 65;
+  const minRate = 600;
+  const maxRate = 4000;
+  const clamped = Math.max(minRate, Math.min(maxRate, crimeRatePer100k as number));
+  return Math.round(100 - ((clamped - minRate) / (maxRate - minRate)) * 100);
+}
+
+function computeVitalityScore(categoryScores: {
+  foodDrink: number;
+  health: number;
+  groceryParks: number;
+  education: number;
+  emergency: number;
+  crime: number;
+}): number {
+  const weighted =
+    categoryScores.foodDrink * 0.2 +
+    categoryScores.health * 0.2 +
+    categoryScores.groceryParks * 0.2 +
+    categoryScores.education * 0.15 +
+    categoryScores.emergency * 0.1 +
+    categoryScores.crime * 0.15;
+  return Math.round(weighted);
+}
+
+function buildAmenityLabels(nearby: RawListing["nearby"]): string[] {
+  if (!nearby) return [];
+  const labels: string[] = [];
+  if ((nearby.schools?.count ?? 0) > 0) labels.push(`${nearby.schools!.count} schools nearby`);
+  if ((nearby.groceries?.count ?? 0) > 0) labels.push(`${nearby.groceries!.count} grocery stores`);
+  if ((nearby.restaurants?.count ?? 0) > 0) labels.push(`${nearby.restaurants!.count} restaurants`);
+  if ((nearby.cafes?.count ?? 0) > 0) labels.push(`${nearby.cafes!.count} cafes`);
+  if ((nearby.parks?.count ?? 0) > 0) labels.push(`${nearby.parks!.count} parks`);
+  if ((nearby.pharmacies?.count ?? 0) > 0) labels.push(`${nearby.pharmacies!.count} pharmacies`);
+  if ((nearby.transit?.count ?? 0) > 0) labels.push(`${nearby.transit!.count} transit stops`);
+  return labels;
+}
 
 let cachedListings: Listing[] | null = null;
 
@@ -107,16 +147,25 @@ async function loadListings(): Promise<Listing[]> {
       const nearby = item.nearby ?? {};
 
       const foodDrink = Math.round(
-        (bucketScore(nearby.restaurants?.count) + bucketScore(nearby.cafes?.count)) / 2
+        (bucketScore(nearby.restaurants?.count) + bucketScore(nearby.cafes?.count)) / 2,
       );
       const health = bucketScore(nearby.pharmacies?.count);
       const groceryParks = Math.round(
-        (bucketScore(nearby.groceries?.count) + bucketScore(nearby.parks?.count)) / 2
+        (bucketScore(nearby.groceries?.count) + bucketScore(nearby.parks?.count)) / 2,
       );
       const education = bucketScore(nearby.schools?.count);
       const emergency = Math.round(health * 0.6 + bucketScore(nearby.transit?.count) * 0.4);
+      const crimeRatePer100k = item.crime?.composite_rate_per_100k ?? null;
+      const crime = computeSafetyScore(crimeRatePer100k);
 
-      const score = Math.round((foodDrink + health + groceryParks + education + emergency) / 5);
+      const score = computeVitalityScore({
+        foodDrink,
+        health,
+        groceryParks,
+        education,
+        emergency,
+        crime,
+      });
       const scoreBand = deriveBand(score);
 
       return {
@@ -143,30 +192,18 @@ async function loadListings(): Promise<Listing[]> {
         leaseTerm: "12 months",
         about: item.title ?? "",
         amenities: buildAmenityLabels(nearby),
-        categoryScores: { foodDrink, health, groceryParks, education, emergency },
+        categoryScores: { foodDrink, health, groceryParks, education, emergency, crime },
+        safetyScore: crime,
+        crimeRatePer100k,
+        crimeNeighborhood: item.crime?.neighbourhood_name ?? null,
+        crimeYear: item.crime?.year ?? null,
+        nearbyBuckets: nearby,
         incomeNeeded: computeIncomeNeeded(monthlyRent),
       };
     });
 
   return cachedListings;
 }
-
-function buildAmenityLabels(
-  nearby: RawListing["nearby"]
-): string[] {
-  if (!nearby) return [];
-  const labels: string[] = [];
-  if ((nearby.schools?.count ?? 0) > 0) labels.push(`${nearby.schools!.count} schools nearby`);
-  if ((nearby.groceries?.count ?? 0) > 0) labels.push(`${nearby.groceries!.count} grocery stores`);
-  if ((nearby.restaurants?.count ?? 0) > 0) labels.push(`${nearby.restaurants!.count} restaurants`);
-  if ((nearby.cafes?.count ?? 0) > 0) labels.push(`${nearby.cafes!.count} cafes`);
-  if ((nearby.parks?.count ?? 0) > 0) labels.push(`${nearby.parks!.count} parks`);
-  if ((nearby.pharmacies?.count ?? 0) > 0) labels.push(`${nearby.pharmacies!.count} pharmacies`);
-  if ((nearby.transit?.count ?? 0) > 0) labels.push(`${nearby.transit!.count} transit stops`);
-  return labels;
-}
-
-// ── Route handler ────────────────────────────────────────────────────────────
 
 export async function GET() {
   try {
@@ -178,5 +215,4 @@ export async function GET() {
   }
 }
 
-// Export for internal reuse by the suggestions route
 export { loadListings };

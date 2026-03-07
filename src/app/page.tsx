@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapboxMap } from "@/components/avenuex/MapboxMap";
 import {
   DesktopNavbar,
@@ -10,20 +10,34 @@ import {
   ScoreBar,
   ScorePill,
 } from "@/components/avenuex/primitives";
-import { avenueNav, listingsCatalog } from "@/lib/avenuex-data";
+import { avenueNav } from "@/lib/avenuex-data";
 import type { FilterType, Listing } from "@/lib/avenuex-data";
 import UserMenu from "@/components/avenuex/UserMenu";
 import { useSavedListings } from "@/hooks/useSavedListings";
 
 type SortMode = "recommended" | "price-asc" | "price-desc" | "score-desc";
 
-const CATEGORY_ROWS = [
+type LiveAmenity = {
+  id: string;
+  name: string;
+  type: string;
+  distance: number;
+  coords: [number, number];
+  isSmallBusiness?: boolean;
+};
+
+const CATEGORY_ROWS: Array<{
+  label: string;
+  key: "foodDrink" | "health" | "groceryParks" | "education" | "emergency" | "crime";
+  color: string;
+}> = [
   { label: "Food & Drink", key: "foodDrink", color: "#F97316" },
   { label: "Health", key: "health", color: "#EC4899" },
   { label: "Grocery & Parks", key: "groceryParks", color: "#22C55E" },
   { label: "Education", key: "education", color: "#3B82F6" },
   { label: "Emergency", key: "emergency", color: "#8B5CF6" },
-] as const;
+  { label: "Safety (Crime)", key: "crime", color: "#16A34A" },
+];
 
 const FILTER_OPTIONS: FilterType[] = ["All", "Apartment", "House", "Condo"];
 
@@ -31,15 +45,51 @@ function bedLabel(listing: Listing) {
   return listing.beds === 0 ? "Studio" : `${listing.beds} Bed${listing.beds > 1 ? "s" : ""}`;
 }
 
+function valueForRow(listing: Listing, key: (typeof CATEGORY_ROWS)[number]["key"]) {
+  if (key === "crime") return listing.categoryScores.crime ?? listing.safetyScore ?? 0;
+  return listing.categoryScores[key];
+}
+
 export default function HeroPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("All");
   const [sort, setSort] = useState<SortMode>("recommended");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [listingsLoading, setListingsLoading] = useState(true);
+  const [listingsError, setListingsError] = useState<string | null>(null);
+  const [liveAmenities, setLiveAmenities] = useState<LiveAmenity[]>([]);
+  const [liveAmenityLoading, setLiveAmenityLoading] = useState(false);
   const { isSaved, toggleSave, savedIds, isLoggedIn } = useSavedListings();
 
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      setListingsLoading(true);
+      setListingsError(null);
+      try {
+        const response = await fetch("/api/listings", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Failed to load listings (${response.status})`);
+        const payload = (await response.json()) as Listing[];
+        if (!active) return;
+        setListings(payload);
+      } catch (error) {
+        if (!active) return;
+        setListingsError(error instanceof Error ? error.message : "Failed to load listings");
+      } finally {
+        if (active) setListingsLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const filteredListings = useMemo<Listing[]>(() => {
-    let items = listingsCatalog;
+    let items = listings;
 
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -47,7 +97,7 @@ export default function HeroPage() {
         (l) =>
           l.address.toLowerCase().includes(q) ||
           l.city.toLowerCase().includes(q) ||
-          l.fullAddress.toLowerCase().includes(q)
+          l.fullAddress.toLowerCase().includes(q),
       );
     }
 
@@ -65,16 +115,49 @@ export default function HeroPage() {
       default:
         return [...items].sort((a, b) => b.score - a.score);
     }
-  }, [search, filter, sort]);
+  }, [listings, search, filter, sort]);
+
+  useEffect(() => {
+    if (selectedId && filteredListings.some((listing) => listing.id === selectedId)) return;
+    setSelectedId(filteredListings[0]?.id ?? null);
+  }, [filteredListings, selectedId]);
 
   const selectedListing = useMemo(
-    () => (selectedId ? (listingsCatalog.find((l) => l.id === selectedId) ?? null) : null),
-    [selectedId]
+    () => (selectedId ? (listings.find((l) => l.id === selectedId) ?? null) : null),
+    [selectedId, listings],
   );
+
+  useEffect(() => {
+    if (!selectedListing) {
+      setLiveAmenities([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLiveAmenityLoading(true);
+
+    fetch(`/api/vitality?lat=${selectedListing.lat}&lng=${selectedListing.lng}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Vitality request failed (${response.status})`);
+        const data = (await response.json()) as { amenities?: LiveAmenity[] };
+        setLiveAmenities(Array.isArray(data.amenities) ? data.amenities : []);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        console.error(error);
+        setLiveAmenities([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLiveAmenityLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [selectedListing]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
-      {/* Navbar */}
       <DesktopNavbar
         searchPlaceholder={avenueNav.searchPlaceholder}
         savedCount={savedIds.size}
@@ -84,9 +167,7 @@ export default function HeroPage() {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Left Sidebar ── */}
         <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
-          {/* Filters */}
           <div className="space-y-3 border-b border-gray-200 p-4">
             <div className="flex flex-wrap gap-1.5">
               {FILTER_OPTIONS.map((f) => (
@@ -94,10 +175,11 @@ export default function HeroPage() {
                   key={f}
                   type="button"
                   onClick={() => setFilter(f)}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${filter === f
-                    ? "bg-green-500 text-white"
-                    : "bg-gray-100 text-slate-500 hover:bg-gray-200 hover:text-slate-700"
-                    }`}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                    filter === f
+                      ? "bg-green-500 text-white"
+                      : "bg-gray-100 text-slate-500 hover:bg-gray-200 hover:text-slate-700"
+                  }`}
                 >
                   {f}
                 </button>
@@ -118,84 +200,91 @@ export default function HeroPage() {
             </p>
           </div>
 
-          {/* Listing Cards */}
           <div className="flex-1 space-y-2 overflow-y-auto p-3">
-            {filteredListings.map((listing) => (
-              <button
-                key={listing.id}
-                type="button"
-                onClick={() => setSelectedId(listing.id)}
-                className={`w-full rounded-xl border p-3 text-left transition ${selectedId === listing.id
-                  ? "border-green-500 bg-green-50"
-                  : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-                  }`}
-              >
-                <div className="flex gap-3">
-                  <div className="relative h-16 w-20 flex-shrink-0 overflow-hidden rounded-lg">
-                    <Image
-                      src={listing.image}
-                      alt={listing.address}
-                      fill
-                      sizes="80px"
-                      className="object-cover"
-                    />
-                    {/* Bookmark heart */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isLoggedIn) toggleSave(listing.id);
-                      }}
-                      className="absolute right-1 top-1 z-10 grid h-6 w-6 place-items-center rounded-full bg-white/80 backdrop-blur-sm transition hover:bg-white"
-                      title={isLoggedIn ? (isSaved(listing.id) ? "Unsave" : "Save") : "Sign in to save"}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill={isSaved(listing.id) ? "#22c55e" : "none"} stroke={isSaved(listing.id) ? "#22c55e" : "#64748b"} strokeWidth="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-alt text-sm font-bold text-slate-900">
-                        {listing.priceLabel}
-                      </span>
-                      <ScorePill label={`${listing.score}`} band={listing.scoreBand} score={listing.score} />
-                    </div>
-                    <p className="mt-0.5 truncate text-xs font-medium text-slate-700">
-                      {listing.address}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {bedLabel(listing)} · {listing.baths}ba · {listing.sqft} sqft
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-400">{listing.city}</p>
-                  </div>
-                </div>
-              </button>
-            ))}
-            {filteredListings.length === 0 && (
-              <p className="mt-8 text-center text-xs text-slate-500">
-                No listings match your search.
+            {listingsLoading && (
+              <p className="mt-8 text-center text-xs text-slate-500">Loading listings...</p>
+            )}
+            {listingsError && (
+              <p className="mt-8 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {listingsError}
               </p>
+            )}
+            {!listingsLoading &&
+              !listingsError &&
+              filteredListings.map((listing) => (
+                <button
+                  key={listing.id}
+                  type="button"
+                  onClick={() => setSelectedId(listing.id)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    selectedId === listing.id
+                      ? "border-green-500 bg-green-50"
+                      : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className="flex gap-3">
+                    <div className="relative h-16 w-20 flex-shrink-0 overflow-hidden rounded-lg">
+                      <Image
+                        src={listing.image || "/canopi-logo.png"}
+                        alt={listing.address}
+                        fill
+                        sizes="80px"
+                        className="object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isLoggedIn) toggleSave(listing.id);
+                        }}
+                        className="absolute right-1 top-1 z-10 grid h-6 w-6 place-items-center rounded-full bg-white/80 backdrop-blur-sm transition hover:bg-white"
+                        title={isLoggedIn ? (isSaved(listing.id) ? "Unsave" : "Save") : "Sign in to save"}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill={isSaved(listing.id) ? "#22c55e" : "none"}
+                          stroke={isSaved(listing.id) ? "#22c55e" : "#64748b"}
+                          strokeWidth="2"
+                        >
+                          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-alt text-sm font-bold text-slate-900">
+                          {listing.priceLabel}
+                        </span>
+                        <ScorePill label={`${listing.score}`} band={listing.scoreBand} score={listing.score} />
+                      </div>
+                      <p className="mt-0.5 truncate text-xs font-medium text-slate-700">{listing.address}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {bedLabel(listing)} · {listing.baths}ba · {listing.sqft} sqft
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-400">{listing.city}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            {!listingsLoading && !listingsError && filteredListings.length === 0 && (
+              <p className="mt-8 text-center text-xs text-slate-500">No listings match your search.</p>
             )}
           </div>
         </aside>
 
-        {/* ── Map ── */}
         <div className="relative flex-1 overflow-hidden">
           <MapboxMap
             listings={filteredListings}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            selectedAmenities={liveAmenities}
           />
         </div>
 
-        {/* ── Right Detail Panel ── */}
         {selectedListing && (
-          <aside
-            key={selectedListing.id}
-            className="flex w-96 flex-shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-white"
-          >
-            {/* Sticky header */}
+          <aside key={selectedListing.id} className="flex w-96 flex-shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-white">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
               <h2 className="mr-2 truncate font-display text-sm font-bold text-slate-900">
                 {selectedListing.address}
@@ -204,10 +293,11 @@ export default function HeroPage() {
                 <button
                   type="button"
                   onClick={() => isLoggedIn && toggleSave(selectedListing.id)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${isSaved(selectedListing.id)
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                    isSaved(selectedListing.id)
                       ? "border-green-500 bg-green-50 text-green-700"
                       : "border-gray-200 bg-white text-slate-500 hover:bg-gray-50"
-                    }`}
+                  }`}
                   title={isLoggedIn ? undefined : "Sign in to save"}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill={isSaved(selectedListing.id) ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
@@ -226,10 +316,9 @@ export default function HeroPage() {
               </div>
             </div>
 
-            {/* Hero image */}
             <div className="relative h-48 w-full flex-shrink-0">
               <Image
-                src={selectedListing.image}
+                src={selectedListing.image || "/canopi-logo.png"}
                 alt={selectedListing.address}
                 fill
                 sizes="384px"
@@ -237,14 +326,10 @@ export default function HeroPage() {
               />
             </div>
 
-            {/* Content */}
             <div className="space-y-4 p-4">
-              {/* Price + score */}
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="font-alt text-2xl font-bold text-slate-900">
-                    {selectedListing.priceLabel}
-                  </p>
+                  <p className="font-alt text-2xl font-bold text-slate-900">{selectedListing.priceLabel}</p>
                   <p className="mt-0.5 text-xs text-slate-500">{selectedListing.fullAddress}</p>
                 </div>
                 <ScorePill
@@ -254,47 +339,19 @@ export default function HeroPage() {
                 />
               </div>
 
-              {/* Meta chips */}
               <div className="flex flex-wrap gap-2">
-                {[
-                  bedLabel(selectedListing),
-                  `${selectedListing.baths} Bath${selectedListing.baths > 1 ? "s" : ""}`,
-                  `${selectedListing.sqft} sqft`,
-                  selectedListing.propertyType,
-                ].map((m) => (
-                  <span
-                    key={m}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
-                  >
+                {[bedLabel(selectedListing), `${selectedListing.baths} Bath${selectedListing.baths > 1 ? "s" : ""}`, `${selectedListing.sqft} sqft`, selectedListing.propertyType].map((m) => (
+                  <span key={m} className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                     {m}
                   </span>
                 ))}
               </div>
 
-              {/* About */}
               <div>
-                <h3 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
-                  About
-                </h3>
+                <h3 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">About</h3>
                 <p className="text-xs leading-relaxed text-slate-600">{selectedListing.about}</p>
               </div>
 
-              {/* Amenities */}
-              <div>
-                <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Amenities
-                </h3>
-                <div className="grid grid-cols-2 gap-y-1.5">
-                  {selectedListing.amenities.map((a) => (
-                    <div key={a} className="flex items-center gap-1.5 text-xs text-slate-700">
-                      <span className="text-green-500">✓</span>
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Vitality Scorecard */}
               <div className="rounded-xl border border-gray-200 p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900">Vitality Score</h3>
@@ -306,7 +363,7 @@ export default function HeroPage() {
                 </div>
                 <div className="space-y-3">
                   {CATEGORY_ROWS.map(({ label, key, color }) => {
-                    const val = selectedListing.categoryScores[key];
+                    const val = valueForRow(selectedListing, key);
                     return (
                       <div key={key}>
                         <div className="mb-1 flex justify-between text-xs">
@@ -320,13 +377,58 @@ export default function HeroPage() {
                 </div>
               </div>
 
-              {/* Lease info */}
+              <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-green-700">Crime Context</h3>
+                <div className="space-y-1 text-xs text-green-900">
+                  <p>
+                    <span className="font-semibold">Neighborhood:</span>{" "}
+                    {selectedListing.crimeNeighborhood ?? "Unavailable"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Composite Crime Rate:</span>{" "}
+                    {selectedListing.crimeRatePer100k != null
+                      ? `${selectedListing.crimeRatePer100k.toFixed(1)} per 100k`
+                      : "Unavailable"}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Safety Score:</span>{" "}
+                    {selectedListing.safetyScore ?? selectedListing.categoryScores.crime ?? "N/A"}
+                  </p>
+                  {selectedListing.crimeYear && (
+                    <p>
+                      <span className="font-semibold">Year:</span> {selectedListing.crimeYear}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-900">Live Amenity Paths</h3>
+                  <span className="text-xs text-slate-500">
+                    {liveAmenityLoading ? "Loading..." : `${liveAmenities.length} points`}
+                  </span>
+                </div>
+                <p className="mb-2 text-xs text-slate-500">
+                  Green bubble + live path lines are rendered directly on the map for this listing.
+                </p>
+                <div className="max-h-36 space-y-1 overflow-y-auto text-xs text-slate-700">
+                  {liveAmenities.slice(0, 8).map((amenity) => (
+                    <div key={amenity.id} className="flex items-center justify-between rounded-md bg-slate-50 px-2 py-1">
+                      <span className="truncate pr-2">{amenity.name}</span>
+                      <span className="text-slate-500">{amenity.distance}m</span>
+                    </div>
+                  ))}
+                  {!liveAmenityLoading && liveAmenities.length === 0 && (
+                    <p className="text-slate-500">No live amenities available for this location.</p>
+                  )}
+                </div>
+              </div>
+
               <div className="rounded-xl bg-slate-50 p-4">
                 <div className="flex justify-between text-xs">
                   <span className="text-slate-500">Available</span>
-                  <span className="font-semibold text-slate-800">
-                    {selectedListing.availableDate}
-                  </span>
+                  <span className="font-semibold text-slate-800">{selectedListing.availableDate}</span>
                 </div>
                 <div className="mt-2 flex justify-between text-xs">
                   <span className="text-slate-500">Lease Term</span>
@@ -334,7 +436,6 @@ export default function HeroPage() {
                 </div>
               </div>
 
-              {/* Property manager */}
               <div className="rounded-xl border border-gray-200 p-4">
                 <div className="mb-3 flex items-center gap-3">
                   <div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-green-500 text-sm font-bold text-white">
@@ -347,7 +448,7 @@ export default function HeroPage() {
                 </div>
                 <div className="flex gap-2">
                   <PrimaryButton className="flex-1 !px-3 !py-2 !text-xs">Book Tour</PrimaryButton>
-                  <GhostButton className="flex-1 !px-3 !py-2 !text-xs border border-gray-200">
+                  <GhostButton className="flex-1 border border-gray-200 !px-3 !py-2 !text-xs">
                     Contact
                   </GhostButton>
                 </div>

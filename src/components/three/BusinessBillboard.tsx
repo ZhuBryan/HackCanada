@@ -107,6 +107,7 @@ function TextureCard({ name, category, isSmallBusiness, glowRef }: TextureCardPr
     );
 
     // Show local fallback first for perceived performance and resilience.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTexture(fallback);
 
     return () => {

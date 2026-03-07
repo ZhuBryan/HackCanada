@@ -12,16 +12,18 @@ export function useSavedListings() {
     // Load saved listings when user signs in
     useEffect(() => {
         if (!user) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSavedIds(new Set());
             return;
         }
+        if (!supabase) return;
 
         setLoading(true);
         supabase
             .from("saved_listings")
             .select("listing_id")
             .eq("user_id", user.id)
-            .then(({ data }) => {
+            .then(({ data }: { data: Array<{ listing_id: string }> | null }) => {
                 if (data) {
                     setSavedIds(new Set(data.map((d) => d.listing_id)));
                 }
@@ -37,6 +39,7 @@ export function useSavedListings() {
     const toggleSave = useCallback(
         async (listingId: string) => {
             if (!user) return;
+            if (!supabase) return;
 
             if (savedIds.has(listingId)) {
                 // Remove

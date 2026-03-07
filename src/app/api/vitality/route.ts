@@ -1,7 +1,44 @@
 import { NextResponse } from "next/server";
-import { Amenity } from "@/lib/types";
+import type { Amenity } from "@/lib/types";
 
-// The "brain" of Avenue-X: Calculates vitality and grabs real places using Overpass
+type OverpassElement = {
+  id: number;
+  lat: number;
+  lon: number;
+  tags?: Record<string, string>;
+};
+
+type AmenityType =
+  | "cafe"
+  | "restaurant"
+  | "grocery"
+  | "transit"
+  | "park"
+  | "healthcare"
+  | "pharmacy"
+  | "other";
+
+function toMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLat = (lat2 - lat1) * 111000;
+  const dLon = (lon2 - lon1) * 82000;
+  return Math.round(Math.sqrt(dLat * dLat + dLon * dLon));
+}
+
+function classify(tags: Record<string, string>): { type: AmenityType; weight: number } {
+  if (tags.amenity === "pharmacy") return { type: "pharmacy", weight: 28 };
+  if (tags.amenity === "clinic" || tags.amenity === "hospital")
+    return { type: "healthcare", weight: 26 };
+  if (tags.shop === "supermarket" || tags.shop === "convenience")
+    return { type: "grocery", weight: 22 };
+  if (tags.amenity === "restaurant" || tags.amenity === "fast_food")
+    return { type: "restaurant", weight: 16 };
+  if (tags.amenity === "cafe") return { type: "cafe", weight: 14 };
+  if (tags.highway === "bus_stop" || tags.railway === "tram_stop")
+    return { type: "transit", weight: 12 };
+  if (tags.leisure === "park") return { type: "park", weight: 10 };
+  return { type: "other", weight: 6 };
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const latParam = searchParams.get("lat");
@@ -10,22 +47,24 @@ export async function GET(request: Request) {
   if (!latParam || !lngParam) {
     return NextResponse.json(
       { error: "lat and lng search parameters are required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   const lat = parseFloat(latParam);
   const lng = parseFloat(lngParam);
-  const radius = 500; // Search radius in meters
+  const radius = 700;
 
-  // Overpass QL Query: Finding cafes, groceries, transit, and healthcare (clinics)
   const overpassQuery = `
     [out:json][timeout:25];
     (
       node["amenity"="cafe"](around:${radius},${lat},${lng});
+      node["amenity"="restaurant"](around:${radius},${lat},${lng});
+      node["amenity"="fast_food"](around:${radius},${lat},${lng});
       node["shop"="supermarket"](around:${radius},${lat},${lng});
       node["shop"="convenience"](around:${radius},${lat},${lng});
       node["highway"="bus_stop"](around:${radius},${lat},${lng});
+      node["railway"="tram_stop"](around:${radius},${lat},${lng});
       node["amenity"="clinic"](around:${radius},${lat},${lng});
       node["amenity"="hospital"](around:${radius},${lat},${lng});
       node["amenity"="pharmacy"](around:${radius},${lat},${lng});
@@ -36,91 +75,68 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(
-        overpassQuery
-      )}`
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`,
+      { next: { revalidate: 300 } },
     );
 
     if (!response.ok) {
-      throw new Error(`Overpass API responded with status: ${response.status}`);
+      throw new Error(`Overpass API status: ${response.status}`);
     }
 
-    const data = await response.json();
-    
+    const data = (await response.json()) as { elements?: OverpassElement[] };
+    const elements = Array.isArray(data.elements) ? data.elements : [];
+
+    const byName = new Map<string, Amenity>();
     let rawScore = 0;
-    const maxPossibleScore = 150; // Arbitrary cap for calculation
-    
-    const amenities: Amenity[] = data.elements
-      .map((el: any): Amenity | null => {
-        if (!el.tags || !el.tags.name) return null; // Skip unnamed nodes
-        
-        // Determine type based on OSM tags
-        let type: Amenity["type"] = "other";
-        let weight = 0;
 
-        if (el.tags.amenity === "cafe") {
-          type = "cafe";
-          weight = 10;
-        } else if (el.tags.shop === "supermarket" || el.tags.shop === "convenience") {
-          type = "grocery";
-          weight = 15;
-        } else if (el.tags.highway === "bus_stop") {
-          type = "transit";
-          weight = 10;
-        } else if (el.tags.leisure === "park") {
-          type = "park";
-          weight = 5;
-        } else if (
-          el.tags.amenity === "clinic" ||
-          el.tags.amenity === "hospital" ||
-          el.tags.amenity === "pharmacy"
-        ) {
-          type = "healthcare"; // We use healthcare for the Vivirion Pink flex
-          weight = 25; 
-        }
+    for (const element of elements) {
+      if (!element.tags) continue;
+      const name = element.tags.name?.trim();
+      if (!name) continue;
 
-        rawScore += weight;
+      const { type, weight } = classify(element.tags);
+      const distance = toMeters(lat, lng, element.lat, element.lon);
+      rawScore += weight;
 
-        // Simple haversine distance approx (lat/lng diff to meters)
-        const dLat = (el.lat - lat) * 111000;
-        const dLng = (el.lon - lng) * 82000; // approx for ~43 deg N
-        const distance = Math.round(Math.sqrt(dLat * dLat + dLng * dLng));
+      const amenity: Amenity = {
+        id: String(element.id),
+        name,
+        type,
+        coords: [element.lat, element.lon],
+        distance,
+        isSmallBusiness: Boolean(
+          type === "cafe" || type === "restaurant" || element.tags.shop === "convenience",
+        ),
+      };
 
-        return {
-          id: el.id.toString(), // We keep ID just in case
-          name: el.tags.name,
-          type,
-          coords: [el.lat, el.lon], // [lat, lng]
-          distance,
-        };
-      })
-      .filter(Boolean) as Amenity[]; // Filter out nulls (unnamed/unmapped)
+      const existing = byName.get(name);
+      if (!existing || amenity.distance < existing.distance) {
+        byName.set(name, amenity);
+      }
+    }
 
-    // Deduplicate amenities (sometimes Overpass returns dups for multiple nodes in same building)
-    const uniqueAmenities = Array.from(new Map(amenities.map(a => [a.name, a])).values());
+    const amenities = Array.from(byName.values())
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 20);
 
-    // Final Score Calculation (0-100 curve)
-    // We curve it so 0 amenities = 0 score, but ~8 good places = 100 score.
-    const scoreFraction = Math.min(rawScore / maxPossibleScore, 1.0);
-    const vitalityScore = Math.round(scoreFraction * 100);
-
-    // Limit to top 15 closest/most relevant (in reality we'd sort by distance, here we just array slice for speed)
-    const topAmenities = uniqueAmenities.slice(0, 15);
+    const vitalityScore = Math.max(0, Math.min(100, Math.round((rawScore / 220) * 100)));
 
     return NextResponse.json({
       vitalityScore,
-      amenities: topAmenities,
+      amenities,
+      source: "overpass",
+      radiusMeters: radius,
     });
   } catch (error) {
     console.error("Overpass API Error:", error);
-    // Return a mock fallback if Overpass rate-limits us (common in hackathons)
     return NextResponse.json(
-      { 
-        error: "Failed to fetch top tier data, using fallback", 
-        vitalityScore: 45, 
-        amenities: [] 
+      {
+        vitalityScore: 45,
+        amenities: [],
+        source: "fallback",
+        error: "Failed to fetch live amenities",
       },
-      { status: 500 }
+      { status: 200 },
     );
   }
 }

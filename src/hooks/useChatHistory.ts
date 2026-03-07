@@ -18,10 +18,12 @@ export function useChatHistory() {
     // Load chat history when user signs in
     useEffect(() => {
         if (!user) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setMessages([]);
             setHistoryId(null);
             return;
         }
+        if (!supabase) return;
 
         setLoading(true);
         supabase
@@ -31,7 +33,7 @@ export function useChatHistory() {
             .order("updated_at", { ascending: false })
             .limit(1)
             .single()
-            .then(({ data }) => {
+            .then(({ data }: { data: { id: string; messages: unknown } | null }) => {
                 if (data) {
                     setMessages(data.messages as ChatMessage[]);
                     setHistoryId(data.id);
@@ -44,6 +46,7 @@ export function useChatHistory() {
         async (msgs: ChatMessage[]) => {
             setMessages(msgs);
             if (!user) return;
+            if (!supabase) return;
 
             if (historyId) {
                 await supabase
@@ -71,6 +74,7 @@ export function useChatHistory() {
     const clearHistory = useCallback(async () => {
         setMessages([]);
         if (!user || !historyId) return;
+        if (!supabase) return;
         await supabase.from("chat_history").delete().eq("id", historyId);
         setHistoryId(null);
     }, [user, historyId]);

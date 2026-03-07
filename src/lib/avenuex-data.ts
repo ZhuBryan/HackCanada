@@ -32,7 +32,28 @@ export type Listing = {
     groceryParks: number;
     education: number;
     emergency: number;
+    crime?: number;
   };
+  crimeRatePer100k?: number | null;
+  crimeNeighborhood?: string | null;
+  crimeYear?: number | null;
+  safetyScore?: number;
+  nearbyBuckets?: Partial<
+    Record<
+      "schools" | "groceries" | "restaurants" | "cafes" | "parks" | "pharmacies" | "transit",
+      {
+        label: string;
+        count: number;
+        places: {
+          name: string;
+          address: string | null;
+          distance_meters: number | null;
+          categories: string[];
+          place_id?: string | null;
+        }[];
+      }
+    >
+  >;
   incomeNeeded?: number;
   personalScore?: number;
   matchReason?: string;

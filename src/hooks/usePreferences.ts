@@ -34,9 +34,11 @@ export function usePreferences() {
     // Load preferences when user signs in
     useEffect(() => {
         if (!user) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPreferences(DEFAULT_PREFS);
             return;
         }
+        if (!supabase) return;
 
         setLoading(true);
         supabase
@@ -44,7 +46,7 @@ export function usePreferences() {
             .select("*")
             .eq("user_id", user.id)
             .single()
-            .then(({ data }) => {
+            .then(({ data }: { data: UserPreferences | null }) => {
                 if (data) {
                     setPreferences({
                         w_schools: data.w_schools,
@@ -65,6 +67,7 @@ export function usePreferences() {
         async (prefs: UserPreferences) => {
             setPreferences(prefs);
             if (!user) return;
+            if (!supabase) return;
 
             await supabase.from("user_preferences").upsert(
                 {
