@@ -71,6 +71,16 @@ const BUCKET_CAPS = {
   transit: 10,
 } as const;
 
+const CATEGORY_RADIUS_METERS = {
+  schools: 500,
+  groceries: EFFECTIVE_RADIUS_METERS,
+  restaurants: EFFECTIVE_RADIUS_METERS,
+  cafes: EFFECTIVE_RADIUS_METERS,
+  parks: EFFECTIVE_RADIUS_METERS,
+  pharmacies: EFFECTIVE_RADIUS_METERS,
+  transit: EFFECTIVE_RADIUS_METERS,
+} as const;
+
 function parsePrice(raw: string | null | undefined): number {
   if (!raw) return 0;
   const digits = raw.replace(/[^0-9]/g, "");
@@ -102,11 +112,12 @@ function normalizeText(value: string | null | undefined): string {
     .trim();
 }
 
-function placesWithinRadius(bucket: NearbyBucket | undefined): NearbyPlace[] {
+function placesWithinRadius(bucket: NearbyBucket | undefined, category: NearbyCategory): NearbyPlace[] {
   if (!bucket || !Array.isArray(bucket.places)) return [];
+  const radius = CATEGORY_RADIUS_METERS[category];
   return bucket.places.filter((place) => {
     if (!Number.isFinite(place.distance_meters)) return false;
-    return (place.distance_meters ?? Infinity) <= EFFECTIVE_RADIUS_METERS;
+    return (place.distance_meters ?? Infinity) <= radius;
   });
 }
 
@@ -178,7 +189,7 @@ function looksLikeRealSchool(place: NearbyPlace): boolean {
 }
 
 function cleanedPlaces(bucket: NearbyBucket | undefined, category: NearbyCategory): NearbyPlace[] {
-  const places = placesWithinRadius(bucket);
+  const places = placesWithinRadius(bucket, category);
 
   if (category === "transit") {
     const filtered = places.filter((place) => {
