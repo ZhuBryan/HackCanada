@@ -193,11 +193,18 @@ export default function HeroPage() {
               </div>
             )}
             {!loadingListings && filteredListings.map((listing) => (
-              <button
+              <div
                 key={listing.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedId(listing.id)}
-                className={`w-full rounded-xl border p-3 text-left transition ${selectedId === listing.id
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedId(listing.id);
+                  }
+                }}
+                className={`w-full cursor-pointer flex-col rounded-xl border p-3 text-left outline-none transition focus:ring-2 focus:ring-green-400 focus:ring-offset-1 ${selectedId === listing.id
                   ? "border-green-500 bg-green-50"
                   : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
                   }`}
@@ -249,7 +256,7 @@ export default function HeroPage() {
                     )}
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
             {filteredListings.length === 0 && (
               <p className="mt-8 text-center text-xs text-slate-500">
