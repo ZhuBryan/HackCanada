@@ -194,7 +194,6 @@ export default function PathTether({
         center
         distanceFactor={15} // Scale text slightly natively
         zIndexRange={[100, 0]}
-        occlude // CRITICAL: Makes label hide behind 3D buildings!
       >
         <div className="bg-slate-900/90 border border-slate-700/50 backdrop-blur-sm px-2 py-1 rounded-full shadow-lg pointer-events-none flex items-center gap-1 transition-colors duration-300">
           <svg className={`w-3 h-3 ${transportMode === "driving" ? "text-orange-400" : "text-slate-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">

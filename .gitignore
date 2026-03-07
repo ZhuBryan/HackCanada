@@ -40,7 +40,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-*.log
-.next/
-out/
-build/
+outline.md

@@ -7,13 +7,21 @@
  * Now hooked into the live Overpass Vitality API for real data.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Canvas } from "@react-three/fiber";
 import DioramaScene from "@/components/three/DioramaScene";
 import type { RentalListing, Amenity } from "@/lib/types";
 
 export default function DioramaPage() {
+  return (
+    <Suspense fallback={<div className="w-screen h-screen bg-[#0A0A1A]" />}>
+      <DioramaPageInner />
+    </Suspense>
+  );
+}
+
+function DioramaPageInner() {
   const searchParams = useSearchParams();
   const latParam = searchParams.get("lat");
   const lngParam = searchParams.get("lng");

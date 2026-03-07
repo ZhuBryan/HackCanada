@@ -41,7 +41,7 @@ function makeFallbackTexture(
   if (!ctx) {
     const tiny = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
     tiny.needsUpdate = true;
-    return tiny;
+    return tiny as unknown as THREE.CanvasTexture;
   }
 
   const border = pickBorderColor(category, isSmallBusiness);
