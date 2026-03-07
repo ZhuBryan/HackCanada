@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Listing } from "@/lib/avenuex-data";
+import { scoreColor } from "@/components/avenuex/primitives";
 
 interface MapboxMapProps {
   listings: Listing[];
@@ -103,26 +104,28 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
           filter: ["==", "extrude", "true"],
         });
 
-        // ~20 m tolerance in degrees (lat ≈ 0.00018°/m, lng ≈ 0.00025°/m at Toronto)
-        const NEAR_DEG = 0.0002;
-
         for (const listing of listingsRef.current) {
+          // Step 1: find the single nearest building feature
+          let nearest: (typeof buildingFeatures)[number] | null = null;
+          let nearestDist = Infinity;
           for (const feature of buildingFeatures) {
             if (feature.id == null) continue;
-            const geom = feature.geometry;
-            let hit = false;
-            if (geom.type === "Polygon") {
-              const ring = geom.coordinates[0] as [number, number][];
-              hit = pointInRing(listing.lng, listing.lat, ring) ||
-                    pointNearRing(listing.lng, listing.lat, ring, NEAR_DEG);
-            } else if (geom.type === "MultiPolygon") {
-              hit = geom.coordinates.some((poly) => {
-                const ring = poly[0] as [number, number][];
-                return pointInRing(listing.lng, listing.lat, ring) ||
-                       pointNearRing(listing.lng, listing.lat, ring, NEAR_DEG);
-              });
-            }
-            if (hit) {
+            const d = minDistToGeom(listing.lng, listing.lat, feature.geometry);
+            if (d < nearestDist) { nearestDist = d; nearest = feature; }
+          }
+          if (!nearest) continue;
+
+          // Step 2: build a vertex key-set for the nearest building
+          // (5 decimal places ≈ 1 m precision — enough to detect shared edges)
+          const anchorKeys = vertexKeySet(nearest.geometry, 5);
+
+          // Step 3: stamp nearest + every building that shares any vertex with it
+          for (const feature of buildingFeatures) {
+            if (feature.id == null) continue;
+            const touches =
+              feature.id === nearest.id ||
+              vertexKeys(feature.geometry, 5).some((k) => anchorKeys.has(k));
+            if (touches) {
               listingFeatureIds.add(feature.id);
               map.setFeatureState(
                 { source: "composite", sourceLayer: "building", id: feature.id },
@@ -207,7 +210,8 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
 
   function addMarker(map: mapboxgl.Map, listing: Listing, active: boolean) {
     const el = document.createElement("div");
-    el.style.cssText = markerBaseStyle(active);
+    el.style.cssText = markerBaseStyle(active, listing.score);
+    el.dataset.score = String(listing.score);
     el.textContent = listing.shortPrice;
     el.addEventListener("click", () => onSelectRef.current(listing.id));
 
@@ -221,16 +225,16 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
   return <div ref={containerRef} className="h-full w-full" />;
 }
 
-function markerBaseStyle(active: boolean): string {
+function markerBaseStyle(active: boolean, score: number): string {
   return [
-    `background: ${active ? "#0f172a" : "#22C55E"}`,
+    `background: ${scoreColor(score)}`,
     "color: white",
     "padding: 5px 12px",
     "border-radius: 999px",
     "font-size: 11px",
     "font-weight: 700",
     "cursor: pointer",
-    "border: 2px solid white",
+    `border: 2px solid ${active ? "#0f172a" : "white"}`,
     "white-space: nowrap",
     "transition: background 0.15s, transform 0.15s",
     "font-family: Inter, sans-serif",
@@ -244,35 +248,44 @@ function markerBaseStyle(active: boolean): string {
 }
 
 function applyMarkerStyle(el: HTMLElement, active: boolean) {
-  el.style.background = active ? "#0f172a" : "#22C55E";
+  el.style.borderColor = active ? "#0f172a" : "white";
   el.style.transform = `scale(${active ? "1.15" : "1"})`;
   el.style.zIndex = active ? "10" : "1";
 }
 
-// Ray-casting point-in-polygon for a single ring (geographic coords).
-function pointInRing(px: number, py: number, ring: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
+function rings(geom: GeoJSON.Geometry): [number, number][][] {
+  if (geom.type === "Polygon") return geom.coordinates as [number, number][][];
+  if (geom.type === "MultiPolygon") return (geom.coordinates as [number, number][][][]).flat();
+  return [];
 }
 
-// Returns true if point is within `threshold` degrees of any edge of the ring.
-function pointNearRing(px: number, py: number, ring: [number, number][], threshold: number): boolean {
-  const t2 = threshold * threshold;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [x1, y1] = ring[j];
-    const [x2, y2] = ring[i];
-    const dx = x2 - x1, dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-    const distSq = (px - (x1 + t * dx)) ** 2 + (py - (y1 + t * dy)) ** 2;
-    if (distSq < t2) return true;
+// Minimum geographic distance from point to a geometry (0 if inside).
+function minDistToGeom(px: number, py: number, geom: GeoJSON.Geometry): number {
+  let min = Infinity;
+  for (const ring of rings(geom)) {
+    // Inside check — distance is 0
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    if (inside) return 0;
+    // Edge distance
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [x1, y1] = ring[j], [x2, y2] = ring[i];
+      const dx = x2 - x1, dy = y2 - y1, lenSq = dx * dx + dy * dy;
+      const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+      min = Math.min(min, (px - x1 - t * dx) ** 2 + (py - y1 - t * dy) ** 2);
+    }
   }
-  return false;
+  return Math.sqrt(min);
+}
+
+// Returns a Set of "lng,lat" strings rounded to `decimals` places.
+function vertexKeySet(geom: GeoJSON.Geometry, decimals: number): Set<string> {
+  return new Set(vertexKeys(geom, decimals));
+}
+
+function vertexKeys(geom: GeoJSON.Geometry, decimals: number): string[] {
+  return rings(geom).flat().map(([vx, vy]) => `${vx.toFixed(decimals)},${vy.toFixed(decimals)}`);
 }

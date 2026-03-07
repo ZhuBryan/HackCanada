@@ -143,7 +143,7 @@ export default function HeroPage() {
                       <span className="font-alt text-sm font-bold text-slate-900">
                         {listing.priceLabel}
                       </span>
-                      <ScorePill label={`${listing.score}`} band={listing.scoreBand} />
+                      <ScorePill label={`${listing.score}`} band={listing.scoreBand} score={listing.score} />
                     </div>
                     <p className="mt-0.5 truncate text-xs font-medium text-slate-700">
                       {listing.address}
@@ -218,6 +218,7 @@ export default function HeroPage() {
                 <ScorePill
                   label={`${selectedListing.score} / 100`}
                   band={selectedListing.scoreBand}
+                  score={selectedListing.score}
                 />
               </div>
 
@@ -268,6 +269,7 @@ export default function HeroPage() {
                   <ScorePill
                     label={`${selectedListing.score} / 100`}
                     band={selectedListing.scoreBand}
+                    score={selectedListing.score}
                   />
                 </div>
                 <div className="space-y-3">

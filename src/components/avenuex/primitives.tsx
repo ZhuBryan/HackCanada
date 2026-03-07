@@ -10,22 +10,20 @@ function cx(...parts: Array<string | false | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-const bandStyles: Record<ScoreBand, { text: string; dot: string; pill: string }> = {
-  great: {
-    text: "text-green-600",
-    dot: "bg-green-500",
-    pill: "bg-green-100",
-  },
-  medium: {
-    text: "text-amber-500",
-    dot: "bg-amber-500",
-    pill: "bg-amber-100",
-  },
-  warning: {
-    text: "text-red-500",
-    dot: "bg-red-500",
-    pill: "bg-red-100",
-  },
+// Same 5-tier palette used by the Mapbox building highlights.
+export function scoreColor(score: number): string {
+  if (score >= 85) return "#15803d";
+  if (score >= 75) return "#4ade80";
+  if (score >= 65) return "#ca8a04"; // darkened yellow for text legibility
+  if (score >= 55) return "#f97316";
+  return "#dc2626";
+}
+
+// Kept for components that still need a band string.
+const bandStyles: Record<ScoreBand, { pill: string }> = {
+  great:   { pill: "bg-green-50" },
+  medium:  { pill: "bg-orange-50" },
+  warning: { pill: "bg-red-50" },
 };
 
 export function AppSwitch() {
@@ -215,17 +213,15 @@ export function ScoreBar({
   );
 }
 
-export function ScorePill({ label, band }: { label: string; band: ScoreBand }) {
-  const styles = bandStyles[band];
+export function ScorePill({ label, band, score }: { label: string; band: ScoreBand; score?: number }) {
+  const color = score !== undefined ? scoreColor(score) : undefined;
+  const { pill } = bandStyles[band];
   return (
     <div
-      className={cx(
-        "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold",
-        styles.pill,
-        styles.text
-      )}
+      className={cx("inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold", pill)}
+      style={color ? { color } : undefined}
     >
-      <span className={cx("h-1.5 w-1.5 rounded-full", styles.dot)} />
+      <span className="h-1.5 w-1.5 rounded-full" style={color ? { backgroundColor: color } : undefined} />
       {label}
     </div>
   );
@@ -280,16 +276,8 @@ export function PropertyCard({
               <span>Vitality Score</span>
               <span>{listing.score} / 100</span>
             </div>
-            <ScoreBar
-              value={listing.score}
-              color={listing.scoreBand === "medium" ? "#F59E0B" : "#22C55E"}
-            />
-            <p
-              className={cx(
-                "mt-2 text-xs font-medium",
-                listing.scoreBand === "medium" ? "text-amber-500" : "text-green-600"
-              )}
-            >
+            <ScoreBar value={listing.score} color={scoreColor(listing.score)} />
+            <p className="mt-2 text-xs font-medium" style={{ color: scoreColor(listing.score) }}>
               {listing.scoreStatus}
             </p>
           </div>
