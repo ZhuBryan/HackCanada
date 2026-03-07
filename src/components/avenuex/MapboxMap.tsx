@@ -43,6 +43,11 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
 
     map.on("load", () => {
+      map.setFog({
+        range: [0.5, 6],
+        color: "#f5f0e8",
+        "horizon-blend": 0.04,
+      });
       // 3D buildings — color driven by feature-state:
       //   hover  → amber highlight
       //   score >= 80 (great) → green
@@ -138,16 +143,6 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
 
       applyListingHighlights();
       map.on("idle", applyListingHighlights);
-
-      // Re-stamp whenever individual composite tiles finish loading,
-      // debounced so rapid tile bursts don't spam the function.
-      let reapplyTimer: ReturnType<typeof setTimeout> | null = null;
-      map.on("sourcedata", (e) => {
-        if (e.sourceId === "composite" && e.tile) {
-          if (reapplyTimer) clearTimeout(reapplyTimer);
-          reapplyTimer = setTimeout(applyListingHighlights, 150);
-        }
-      });
 
       // ── Markers ────────────────────────────────────────────────────────────
       for (const listing of listingsRef.current) {
