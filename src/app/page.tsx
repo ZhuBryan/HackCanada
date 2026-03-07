@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { MapboxMap } from "@/components/avenuex/MapboxMap";
 import {
   DesktopNavbar,
@@ -10,10 +10,9 @@ import {
   ScoreBar,
   ScorePill,
 } from "@/components/avenuex/primitives";
-import { avenueNav } from "@/lib/avenuex-data";
+import { avenueNav, listingsCatalog } from "@/lib/avenuex-data";
 import type { FilterType, Listing } from "@/lib/avenuex-data";
-import UserPriorityPanel from "@/components/avenuex/UserPriorityPanel";
-import ChatPanel from "@/components/avenuex/ChatPanel";
+import UserMenu from "@/components/avenuex/UserMenu";
 
 type SortMode = "recommended" | "price-asc" | "price-desc" | "score-desc";
 
@@ -32,34 +31,13 @@ function bedLabel(listing: Listing) {
 }
 
 export default function HeroPage() {
-  const [listings, setListings] = useState<Listing[]>([]);
-  const [loadingListings, setLoadingListings] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("All");
   const [sort, setSort] = useState<SortMode>("recommended");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Fetch listings from API on mount
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/listings");
-        if (!res.ok) throw new Error("Failed to fetch listings");
-        const data: Listing[] = await res.json();
-        if (!cancelled) setListings(data);
-      } catch (err) {
-        console.error("Failed to load listings:", err);
-        // fallback: listings stay empty
-      } finally {
-        if (!cancelled) setLoadingListings(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
   const filteredListings = useMemo<Listing[]>(() => {
-    let items = listings;
+    let items = listingsCatalog;
 
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -85,17 +63,12 @@ export default function HeroPage() {
       default:
         return [...items].sort((a, b) => b.score - a.score);
     }
-  }, [listings, search, filter, sort]);
+  }, [search, filter, sort]);
 
   const selectedListing = useMemo(
-    () => (selectedId ? (listings.find((l) => l.id === selectedId) ?? null) : null),
-    [selectedId, listings]
+    () => (selectedId ? (listingsCatalog.find((l) => l.id === selectedId) ?? null) : null),
+    [selectedId]
   );
-
-  const handlePriorityResults = (results: Listing[]) => {
-    setListings(results);
-    setSelectedId(null);
-  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
@@ -105,16 +78,12 @@ export default function HeroPage() {
         savedCount={0}
         searchValue={search}
         onSearchValueChange={setSearch}
+        userMenu={<UserMenu />}
       />
 
       <div className="flex flex-1 overflow-hidden">
         {/* ── Left Sidebar ── */}
         <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
-          {/* Personalize Panel */}
-          <div className="border-b border-gray-200 p-3">
-            <UserPriorityPanel onResults={handlePriorityResults} />
-          </div>
-
           {/* Filters */}
           <div className="space-y-3 border-b border-gray-200 p-4">
             <div className="flex flex-wrap gap-1.5">
@@ -124,8 +93,8 @@ export default function HeroPage() {
                   type="button"
                   onClick={() => setFilter(f)}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition ${filter === f
-                      ? "bg-green-500 text-white"
-                      : "bg-gray-100 text-slate-500 hover:bg-gray-200 hover:text-slate-700"
+                    ? "bg-green-500 text-white"
+                    : "bg-gray-100 text-slate-500 hover:bg-gray-200 hover:text-slate-700"
                     }`}
                 >
                   {f}
@@ -149,20 +118,14 @@ export default function HeroPage() {
 
           {/* Listing Cards */}
           <div className="flex-1 space-y-2 overflow-y-auto p-3">
-            {loadingListings && (
-              <div className="flex flex-col items-center justify-center gap-2 py-12">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-green-500 border-t-transparent" />
-                <p className="text-xs text-slate-400">Loading listings…</p>
-              </div>
-            )}
-            {!loadingListings && filteredListings.map((listing) => (
+            {filteredListings.map((listing) => (
               <button
                 key={listing.id}
                 type="button"
                 onClick={() => setSelectedId(listing.id)}
                 className={`w-full rounded-xl border p-3 text-left transition ${selectedId === listing.id
-                    ? "border-green-500 bg-green-50"
-                    : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+                  ? "border-green-500 bg-green-50"
+                  : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
                   }`}
               >
                 <div className="flex gap-3">
@@ -189,16 +152,11 @@ export default function HeroPage() {
                       {bedLabel(listing)} · {listing.baths}ba · {listing.sqft} sqft
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">{listing.city}</p>
-                    {listing.matchReason && (
-                      <p className="mt-0.5 truncate text-xs font-medium text-green-600">
-                        {listing.matchReason}
-                      </p>
-                    )}
                   </div>
                 </div>
               </button>
             ))}
-            {!loadingListings && filteredListings.length === 0 && (
+            {filteredListings.length === 0 && (
               <p className="mt-8 text-center text-xs text-slate-500">
                 No listings match your search.
               </p>
@@ -256,11 +214,6 @@ export default function HeroPage() {
                     {selectedListing.priceLabel}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">{selectedListing.fullAddress}</p>
-                  {selectedListing.incomeNeeded != null && (
-                    <span className="mt-1 inline-block rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-                      ${Math.round(selectedListing.incomeNeeded / 1000)}K+ income needed
-                    </span>
-                  )}
                 </div>
                 <ScorePill
                   label={`${selectedListing.score} / 100`}
@@ -268,18 +221,6 @@ export default function HeroPage() {
                   score={selectedListing.score}
                 />
               </div>
-
-              {/* Match reason */}
-              {selectedListing.matchReason && (
-                <p className="text-xs font-medium text-green-600">
-                  ✦ {selectedListing.matchReason}
-                  {selectedListing.personalScore != null && (
-                    <span className="ml-1 text-slate-400">
-                      (Match: {selectedListing.personalScore}%)
-                    </span>
-                  )}
-                </p>
-              )}
 
               {/* Meta chips */}
               <div className="flex flex-wrap gap-2">
@@ -383,9 +324,6 @@ export default function HeroPage() {
           </aside>
         )}
       </div>
-
-      {/* Chat Panel (floating) */}
-      <ChatPanel />
     </div>
   );
 }
