@@ -248,33 +248,33 @@ async function fallbackResponse(lastMessage: string): Promise<string> {
 
 async function buildSystemPrompt(): Promise<string> {
     const rawListings = await loadRaw();
-    const summaries = rawListings
-        .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
-        .slice(0, 30)
+    const validListings = rawListings.filter(
+        (item) => Number.isFinite(item.lat) && Number.isFinite(item.lng)
+    );
+    const summaries = validListings
         .map((item) => {
             const rent = parsePrice(item.price);
             const addr = extractAddress(item.location);
             const nb = item.nearby ?? {};
             const buckets = BUCKET_KEYS.map((k) => `${k}: ${nb[k]?.count ?? 0}`).join(", ");
             const income = computeIncomeNeeded(rent);
-            return `• rf-${item.listing_id}: ${addr} — $${rent}/mo | ${buckets} | income needed: $${Math.round(income / 1000)}K+`;
+            return `• rf-${item.listing_id}: ${addr} ($${rent}/mo) @ ${item.lat},${item.lng} | ${buckets} | income: $${Math.round(income / 1000)}K+`;
         })
         .join("\n");
 
-    return `You are the Canopi Assistant, a friendly and conversational AI chatbot for the Canopi rental platform in Toronto. You help renters with all kinds of questions — budgeting, neighborhoods, lifestyle advice, lease tips, moving logistics, and more.
+    return `You are the Canopi Assistant, a friendly and knowledgeable AI for the Canopi rental platform in Toronto. You help renters find apartments, answer questions about neighborhoods, budgeting, and Toronto life.
 
-You have knowledge of ${rawListings.length} real rental listings. Here is a summary:
+You have access to ${validListings.length} REAL rental listings with their exact GPS coordinates. Here are ALL of them:
 
 ${summaries}
 
-Guidelines:
-- Be conversational, warm, and concise. Chat naturally like a helpful friend who knows Toronto real estate.
-- Answer general questions about renting, neighborhoods, budgeting, Toronto life, etc. You don't always need to recommend listings.
-- Only recommend specific listings when the user asks for suggestions, mentions a budget, or asks about specific neighborhoods.
-- When you do recommend listings, mention address, price, and income needed.
-- Keep responses short (2-4 sentences for casual questions, longer only when listing details are needed).
-- If the user asks something unrelated to renting, still be helpful but gently steer back to how Canopi can help.
-- Suggest using the Personalize panel in the sidebar for detailed filtering when appropriate.`;
+IMPORTANT RULES:
+1. When the user asks about locations, landmarks, neighborhoods, or "places near X", use the lat/lng coordinates to find the CLOSEST listings and recommend them BY NAME with address, price, and income needed.
+2. ALWAYS recommend 2-3 specific apartments from the list above when the user asks for suggestions. Use the actual addresses and prices from the data.
+3. For geographic queries, Toronto landmarks you should know: Google HQ is near King & Spadina (43.644, -79.396), CN Tower (43.643, -79.387), Union Station (43.645, -79.381), U of T (43.663, -79.396), Eaton Centre (43.654, -79.381).
+4. Be conversational and warm. Keep responses concise but always include specific listing recommendations when relevant.
+5. When recommending, format like: "**[Address]** — $X,XXX/mo (Income needed: $XXK+)"
+6. Suggest using the Personalize panel for detailed slider-based filtering when appropriate.`;
 }
 
 async function geminiResponse(messages: ChatMessage[]): Promise<string> {
