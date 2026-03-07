@@ -12,6 +12,7 @@ interface SelectedAmenity {
   type: string;
   distance: number;
   coords: [number, number];
+  isSmallBusiness?: boolean;
 }
 
 interface MapboxMapProps {
@@ -34,6 +35,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
   const listingToFeatureIdsRef = useRef<Map<string, Set<BuildingId>>>(new Map());
   const featureToListingIdRef = useRef<Map<BuildingId, string>>(new Map());
   const activeSelectedBuildingIdsRef = useRef<Set<BuildingId>>(new Set());
+  const amenityPopupRef = useRef<mapboxgl.Popup | null>(null);
 
   useEffect(() => {
     listingsRef.current = listings;
@@ -145,9 +147,43 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
             "#dc2626",
             "#ede8dc",
           ],
-          "fill-extrusion-height": ["get", "height"],
+          "fill-extrusion-height": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            ["+", ["coalesce", ["get", "height"], 0], 16],
+            ["coalesce", ["get", "height"], 0],
+          ],
           "fill-extrusion-base": ["get", "min_height"],
-          "fill-extrusion-opacity": 0.9,
+          "fill-extrusion-opacity": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            1,
+            0.9,
+          ],
+        },
+      });
+      map.addLayer({
+        id: "3d-buildings-selected-shell",
+        source: "composite",
+        "source-layer": "building",
+        filter: ["==", "extrude", "true"],
+        type: "fill-extrusion",
+        minzoom: 12,
+        paint: {
+          "fill-extrusion-color": "#22C55E",
+          "fill-extrusion-height": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            ["+", ["coalesce", ["get", "height"], 0], 26],
+            0,
+          ],
+          "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+          "fill-extrusion-opacity": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            0.35,
+            0,
+          ],
         },
       });
 
@@ -207,10 +243,16 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         source: "amenity-paths",
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-radius": 4.5,
-          "circle-color": ["coalesce", ["get", "color"], "#38bdf8"],
           "circle-stroke-width": 1,
           "circle-stroke-color": "#ffffff",
+          "circle-opacity": 0.95,
+          "circle-radius": [
+            "case",
+            ["boolean", ["feature-state", "hover"], false],
+            7,
+            5,
+          ],
+          "circle-color": ["coalesce", ["get", "color"], "#38bdf8"],
         },
       });
       map.addLayer({
@@ -323,6 +365,51 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         }
       });
 
+      map.on("mouseenter", "amenity-path-points", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "amenity-path-points", () => {
+        map.getCanvas().style.cursor = "";
+      });
+      map.on("mousemove", "amenity-path-points", (event) => {
+        const hovered = event.features?.[0];
+        if (!hovered || hovered.id == null) return;
+        map.setFeatureState(
+          { source: "amenity-paths", id: hovered.id },
+          { hover: true },
+        );
+      });
+      map.on("mouseleave", "amenity-path-points", () => {
+        map.removeFeatureState({ source: "amenity-paths" }, "hover");
+      });
+      map.on("click", "amenity-path-points", (event) => {
+        const feature = event.features?.[0];
+        if (!feature || feature.geometry.type !== "Point") return;
+        const props = feature.properties ?? {};
+        const name = String(props.name ?? "Amenity");
+        const type = String(props.type ?? "other");
+        const distance = Number(props.distance ?? 0);
+        const isSmallBusiness = String(props.isSmallBusiness ?? "false") === "true";
+        const lngLat = (feature.geometry.coordinates as [number, number]);
+
+        amenityPopupRef.current?.remove();
+        amenityPopupRef.current = new mapboxgl.Popup({
+          closeButton: true,
+          closeOnClick: true,
+          maxWidth: "260px",
+        })
+          .setLngLat(lngLat)
+          .setHTML(
+            `<div style="font-family:Inter,sans-serif;color:#0f172a">
+              <div style="font-size:13px;font-weight:700;margin-bottom:3px">${escapeHtml(name)}</div>
+              <div style="font-size:12px;color:#475569">${escapeHtml(formatAmenityType(type))}</div>
+              <div style="font-size:12px;color:#334155;margin-top:4px">${Number.isFinite(distance) ? `${Math.round(distance)}m from selected building` : "Distance unavailable"}</div>
+              ${isSmallBusiness ? '<div style="font-size:11px;color:#166534;margin-top:4px">Local small business</div>' : ""}
+            </div>`,
+          )
+          .addTo(map);
+      });
+
       for (const listing of listingsRef.current) {
         addMarker(map, listing, listing.id === selectedIdRef.current);
       }
@@ -330,6 +417,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
     const markers = markersRef.current;
     return () => {
+      amenityPopupRef.current?.remove();
       window.clearInterval(pulseInterval);
       markers.forEach((marker) => marker.remove());
       markers.clear();
@@ -409,9 +497,15 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     if (!map || !map.isStyleLoaded()) return;
     const selectedListing = selectedId ? listings.find((listing) => listing.id === selectedId) : null;
     const source = map.getSource("amenity-paths") as mapboxgl.GeoJSONSource | undefined;
-    if (!source || !selectedListing) return;
+    if (!source) return;
+    if (!selectedListing) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      amenityPopupRef.current?.remove();
+      return;
+    }
 
     const features: GeoJSON.Feature[] = [];
+    let idx = 0;
     for (const amenity of selectedAmenities) {
       const [lat, lng] = amenity.coords;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
@@ -419,6 +513,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
       features.push({
         type: "Feature",
+        id: `line-${amenity.id}`,
         properties: {
           id: `line-${amenity.id}`,
           name: amenity.name,
@@ -437,18 +532,21 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
       features.push({
         type: "Feature",
+        id: `point-${amenity.id}-${idx}`,
         properties: {
           id: amenity.id,
           name: amenity.name,
           type: amenity.type,
           color,
           distance: amenity.distance,
+          isSmallBusiness: Boolean(amenity.isSmallBusiness),
         },
         geometry: {
           type: "Point",
           coordinates: [lng, lat],
         },
       });
+      idx += 1;
     }
 
     source.setData({
@@ -477,6 +575,36 @@ function colorForAmenityType(type: string): string {
     default:
       return "#38BDF8";
   }
+}
+
+function formatAmenityType(type: string): string {
+  switch (type) {
+    case "grocery":
+      return "Grocery Store";
+    case "pharmacy":
+      return "Pharmacy";
+    case "healthcare":
+      return "Healthcare";
+    case "cafe":
+      return "Cafe";
+    case "restaurant":
+      return "Restaurant";
+    case "park":
+      return "Park";
+    case "transit":
+      return "Transit Stop";
+    default:
+      return "Amenity";
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function markerBaseStyle(active: boolean, score: number): string {
