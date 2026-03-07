@@ -25,6 +25,11 @@ type LiveAmenity = {
   distance: number;
   coords: [number, number];
   isSmallBusiness?: boolean;
+  rating?: number;
+  walkMinutes?: number;
+  address?: string | null;
+  description?: string;
+  source?: string;
 };
 
 const CATEGORY_ROWS: Array<{

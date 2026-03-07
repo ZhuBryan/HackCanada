@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Listing } from "@/lib/avenuex-data";
@@ -13,6 +13,11 @@ interface SelectedAmenity {
   distance: number;
   coords: [number, number];
   isSmallBusiness?: boolean;
+  rating?: number;
+  walkMinutes?: number;
+  address?: string | null;
+  description?: string;
+  source?: string;
 }
 
 interface MapboxMapProps {
@@ -36,6 +41,9 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
   const featureToListingIdRef = useRef<Map<BuildingId, string>>(new Map());
   const activeSelectedBuildingIdsRef = useRef<Set<BuildingId>>(new Set());
   const amenityPopupRef = useRef<mapboxgl.Popup | null>(null);
+  const highlightDirtyRef = useRef(true);
+  const triggerHighlightRef = useRef<(() => void) | null>(null);
+  const [poisVisible, setPoisVisible] = useState(false);
 
   useEffect(() => {
     listingsRef.current = listings;
@@ -91,18 +99,15 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: "mapbox://styles/mapbox/streets-v12",
+      style: "mapbox://styles/sym7534/cmmgpkjan00a701qsb6jbchc8",
       center: [-79.3832, 43.6532],
-      zoom: 13.5,
-      pitch: 48,
+      zoom: 14,
+      pitch: 45,
       bearing: -10,
       dragRotate: false,
-      antialias: true,
+      antialias: false,
       maxTileCacheSize: 20,
-      maxBounds: [
-        [-80.15, 43.35],
-        [-78.95, 44.1],
-      ],
+      maxBounds: [[-79.65, 43.55], [-79.10, 43.85]],
     });
 
     mapRef.current = map;
@@ -111,8 +116,8 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
     const pulseInterval = window.setInterval(() => {
       if (!map.getLayer("selected-bubble")) return;
-      const t = Date.now() / 600;
-      const radius = 18 + Math.sin(t) * 4;
+      const t = Date.now() / 550;
+      const radius = 20 + Math.sin(t) * 5;
       map.setPaintProperty("selected-bubble", "circle-radius", radius);
     }, 120);
 
@@ -123,13 +128,20 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         "horizon-blend": 0.04,
       });
 
+      if (!map.getSource("composite")) {
+        map.addSource("composite", {
+          type: "vector",
+          url: "mapbox://mapbox.mapbox-streets-v8",
+        });
+      }
+
       map.addLayer({
         id: "3d-buildings",
         source: "composite",
         "source-layer": "building",
         filter: ["==", "extrude", "true"],
         type: "fill-extrusion",
-        minzoom: 12,
+        minzoom: 10,
         paint: {
           "fill-extrusion-color": [
             "case",
@@ -145,43 +157,44 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
             "#f97316",
             [">=", ["coalesce", ["feature-state", "listingScore"], 0], 35],
             "#dc2626",
-            "#ede8dc",
+            "#f6f5f4",
           ],
           "fill-extrusion-height": [
             "case",
             ["boolean", ["feature-state", "selected"], false],
-            ["+", ["coalesce", ["get", "height"], 0], 16],
+            ["+", ["coalesce", ["get", "height"], 0], 20],
             ["coalesce", ["get", "height"], 0],
           ],
-          "fill-extrusion-base": ["get", "min_height"],
+          "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
           "fill-extrusion-opacity": [
             "case",
             ["boolean", ["feature-state", "selected"], false],
             1,
-            0.9,
+            0.88,
           ],
         },
       });
+
       map.addLayer({
         id: "3d-buildings-selected-shell",
         source: "composite",
         "source-layer": "building",
         filter: ["==", "extrude", "true"],
         type: "fill-extrusion",
-        minzoom: 12,
+        minzoom: 10,
         paint: {
           "fill-extrusion-color": "#22C55E",
           "fill-extrusion-height": [
             "case",
             ["boolean", ["feature-state", "selected"], false],
-            ["+", ["coalesce", ["get", "height"], 0], 26],
+            ["+", ["coalesce", ["get", "height"], 0], 34],
             0,
           ],
           "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
           "fill-extrusion-opacity": [
             "case",
             ["boolean", ["feature-state", "selected"], false],
-            0.35,
+            0.38,
             0,
           ],
         },
@@ -199,10 +212,10 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         type: "circle",
         source: "selected-listing",
         paint: {
-          "circle-radius": 18,
+          "circle-radius": 20,
           "circle-color": "#22c55e",
-          "circle-opacity": 0.18,
-          "circle-stroke-width": 1.5,
+          "circle-opacity": 0.2,
+          "circle-stroke-width": 2,
           "circle-stroke-color": "#16a34a",
         },
       });
@@ -211,11 +224,11 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         type: "circle",
         source: "selected-listing",
         paint: {
-          "circle-radius": 6,
+          "circle-radius": 7,
           "circle-color": "#16a34a",
-          "circle-stroke-width": 1.5,
+          "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
-          "circle-opacity": 0.95,
+          "circle-opacity": 0.98,
         },
       });
 
@@ -233,8 +246,8 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         filter: ["==", ["geometry-type"], "LineString"],
         paint: {
           "line-color": ["coalesce", ["get", "color"], "#38bdf8"],
-          "line-width": 2.5,
-          "line-opacity": 0.82,
+          "line-width": 2.8,
+          "line-opacity": 0.88,
         },
       });
       map.addLayer({
@@ -243,14 +256,14 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         source: "amenity-paths",
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-stroke-width": 1,
+          "circle-stroke-width": 1.5,
           "circle-stroke-color": "#ffffff",
-          "circle-opacity": 0.95,
+          "circle-opacity": 0.98,
           "circle-radius": [
             "case",
             ["boolean", ["feature-state", "hover"], false],
-            7,
-            5,
+            8,
+            5.5,
           ],
           "circle-color": ["coalesce", ["get", "color"], "#38bdf8"],
         },
@@ -277,6 +290,9 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
       const listingFeatureIds = new Set<BuildingId>();
 
       const applyListingHighlights = () => {
+        if (!highlightDirtyRef.current) return;
+        highlightDirtyRef.current = false;
+
         for (const id of listingFeatureIds) {
           map.setFeatureState(
             { source: "composite", sourceLayer: "building", id },
@@ -293,10 +309,14 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         });
 
         for (const listing of listingsRef.current) {
+          const pad = 0.003;
           let nearest: (typeof buildingFeatures)[number] | null = null;
           let nearestDist = Infinity;
           for (const feature of buildingFeatures) {
             if (feature.id == null) continue;
+            const b = geomBounds(feature.geometry);
+            if (!b || b.maxLng < listing.lng - pad || b.minLng > listing.lng + pad ||
+                       b.maxLat < listing.lat - pad || b.minLat > listing.lat + pad) continue;
             const d = minDistToGeom(listing.lng, listing.lat, feature.geometry);
             if (d < nearestDist) {
               nearestDist = d;
@@ -307,9 +327,13 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
           const anchorKeys = vertexKeySet(nearest.geometry, 5);
           const idsForListing = new Set<BuildingId>();
+          const pad2 = 0.005;
 
           for (const feature of buildingFeatures) {
             if (feature.id == null) continue;
+            const b = geomBounds(feature.geometry);
+            if (!b || b.maxLng < listing.lng - pad2 || b.minLng > listing.lng + pad2 ||
+                       b.maxLat < listing.lat - pad2 || b.minLat > listing.lat + pad2) continue;
             const touches =
               feature.id === nearest.id ||
               vertexKeys(feature.geometry, 5).some((key) => anchorKeys.has(key));
@@ -332,8 +356,26 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         setSelectedBuildingState(map, selectedIdRef.current);
       };
 
+      let highlightTimer: number | null = null;
+      const scheduleHighlight = () => {
+        if (!highlightDirtyRef.current) return;
+        if (highlightTimer) window.clearTimeout(highlightTimer);
+        highlightTimer = window.setTimeout(applyListingHighlights, 180);
+      };
+
+      triggerHighlightRef.current = () => {
+        highlightDirtyRef.current = true;
+        scheduleHighlight();
+      };
+
+      map.on("sourcedata", (e) => {
+        if (e.sourceId === "composite" && e.isSourceLoaded) {
+          highlightDirtyRef.current = true;
+        }
+      });
+
       applyListingHighlights();
-      map.on("idle", applyListingHighlights);
+      map.on("idle", scheduleHighlight);
 
       map.on("mouseenter", "3d-buildings", () => {
         map.getCanvas().style.cursor = "pointer";
@@ -360,9 +402,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
           }))
           .sort((a, b) => a.distance - b.distance)[0]?.listing;
 
-        if (nearestListing) {
-          onSelectRef.current(nearestListing.id);
-        }
+        if (nearestListing) onSelectRef.current(nearestListing.id);
       });
 
       map.on("mouseenter", "amenity-path-points", () => {
@@ -370,8 +410,10 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
       });
       map.on("mouseleave", "amenity-path-points", () => {
         map.getCanvas().style.cursor = "";
+        map.removeFeatureState({ source: "amenity-paths" }, "hover");
       });
       map.on("mousemove", "amenity-path-points", (event) => {
+        map.removeFeatureState({ source: "amenity-paths" }, "hover");
         const hovered = event.features?.[0];
         if (!hovered || hovered.id == null) return;
         map.setFeatureState(
@@ -379,36 +421,59 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
           { hover: true },
         );
       });
-      map.on("mouseleave", "amenity-path-points", () => {
-        map.removeFeatureState({ source: "amenity-paths" }, "hover");
-      });
+
       map.on("click", "amenity-path-points", (event) => {
         const feature = event.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
+
         const props = feature.properties ?? {};
         const name = String(props.name ?? "Amenity");
         const type = String(props.type ?? "other");
         const distance = Number(props.distance ?? 0);
+        const rating = Number(props.rating ?? 0);
+        const walkMinutes = Number(props.walkMinutes ?? 0);
         const isSmallBusiness = String(props.isSmallBusiness ?? "false") === "true";
-        const lngLat = (feature.geometry.coordinates as [number, number]);
+        const address = String(props.address ?? "");
+        const description = String(props.description ?? "");
+        const source = String(props.source ?? "Live amenity data");
+        const lngLat = feature.geometry.coordinates as [number, number];
 
         amenityPopupRef.current?.remove();
         amenityPopupRef.current = new mapboxgl.Popup({
           closeButton: true,
           closeOnClick: true,
-          maxWidth: "260px",
+          maxWidth: "300px",
+          className: "amenity-popup",
         })
           .setLngLat(lngLat)
           .setHTML(
-            `<div style="font-family:Inter,sans-serif;color:#0f172a">
-              <div style="font-size:13px;font-weight:700;margin-bottom:3px">${escapeHtml(name)}</div>
-              <div style="font-size:12px;color:#475569">${escapeHtml(formatAmenityType(type))}</div>
-              <div style="font-size:12px;color:#334155;margin-top:4px">${Number.isFinite(distance) ? `${Math.round(distance)}m from selected building` : "Distance unavailable"}</div>
-              ${isSmallBusiness ? '<div style="font-size:11px;color:#166534;margin-top:4px">Local small business</div>' : ""}
+            `<div style="font-family:Inter,sans-serif;color:#0f172a;padding:2px 1px">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+                <div style="font-size:13px;font-weight:800;line-height:1.3">${escapeHtml(name)}</div>
+                ${Number.isFinite(rating) && rating > 0 ? `<span style="font-size:11px;font-weight:700;background:#ecfdf5;color:#166534;padding:2px 7px;border-radius:999px;border:1px solid #86efac">${Math.round(rating)}/100</span>` : ""}
+              </div>
+              <div style="font-size:12px;color:#475569;margin-bottom:5px">${escapeHtml(formatAmenityType(type))}</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+                <span style="font-size:11px;background:#f1f5f9;color:#334155;padding:2px 7px;border-radius:999px">${Number.isFinite(distance) ? `${Math.round(distance)}m away` : "Distance n/a"}</span>
+                <span style="font-size:11px;background:#eff6ff;color:#1e3a8a;padding:2px 7px;border-radius:999px">${Number.isFinite(walkMinutes) && walkMinutes > 0 ? `${Math.round(walkMinutes)} min walk` : "Walk n/a"}</span>
+                ${isSmallBusiness ? '<span style="font-size:11px;background:#fefce8;color:#854d0e;padding:2px 7px;border-radius:999px">Local small business</span>' : ""}
+              </div>
+              ${address ? `<div style="font-size:11px;color:#334155;margin-bottom:4px">${escapeHtml(address)}</div>` : ""}
+              ${description ? `<div style="font-size:11px;color:#64748b;margin-bottom:4px;line-height:1.4">${escapeHtml(description)}</div>` : ""}
+              <div style="font-size:10px;color:#94a3b8">Source: ${escapeHtml(source)}</div>
             </div>`,
           )
           .addTo(map);
       });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty?.("basemap", "showPointOfInterestLabels", poisVisible);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty?.("basemap", "showTransitLabels", poisVisible);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty?.("basemap", "show3dFacades", false);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty?.("basemap", "show3dBuildings", false);
 
       for (const listing of listingsRef.current) {
         addMarker(map, listing, listing.id === selectedIdRef.current);
@@ -447,6 +512,8 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     markersRef.current.forEach((marker, id) => {
       applyMarkerStyle(marker.getElement(), id === selectedId);
     });
+
+    triggerHighlightRef.current?.();
   }, [listings, selectedId]);
 
   useEffect(() => {
@@ -498,6 +565,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     const selectedListing = selectedId ? listings.find((listing) => listing.id === selectedId) : null;
     const source = map.getSource("amenity-paths") as mapboxgl.GeoJSONSource | undefined;
     if (!source) return;
+
     if (!selectedListing) {
       source.setData({ type: "FeatureCollection", features: [] });
       amenityPopupRef.current?.remove();
@@ -539,6 +607,11 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
           type: amenity.type,
           color,
           distance: amenity.distance,
+          rating: amenity.rating ?? null,
+          walkMinutes: amenity.walkMinutes ?? null,
+          address: amenity.address ?? "",
+          description: amenity.description ?? "",
+          source: amenity.source ?? "OpenStreetMap",
           isSmallBusiness: Boolean(amenity.isSmallBusiness),
         },
         geometry: {
@@ -555,7 +628,27 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     });
   }, [selectedAmenities, selectedId, listings]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (map as any).setConfigProperty?.("basemap", "showPointOfInterestLabels", poisVisible);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (map as any).setConfigProperty?.("basemap", "showTransitLabels", poisVisible);
+  }, [poisVisible]);
+
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      <button
+        type="button"
+        onClick={() => setPoisVisible((v) => !v)}
+        className="absolute bottom-[88px] right-3 z-10 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md transition hover:bg-slate-50"
+      >
+        {poisVisible ? "Hide POIs" : "Show POIs"}
+      </button>
+    </div>
+  );
 }
 
 function colorForAmenityType(type: string): string {
@@ -603,7 +696,7 @@ function escapeHtml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
 
@@ -672,4 +765,22 @@ function vertexKeys(geom: GeoJSON.Geometry, decimals: number): string[] {
   return rings(geom)
     .flat()
     .map(([vx, vy]) => `${vx.toFixed(decimals)},${vy.toFixed(decimals)}`);
+}
+
+function geomBounds(geom: GeoJSON.Geometry): { minLng: number; maxLng: number; minLat: number; maxLat: number } | null {
+  const r = rings(geom);
+  if (r.length === 0) return null;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const ring of r) {
+    for (const [lng, lat] of ring) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+  }
+  return { minLng, maxLng, minLat, maxLat };
 }

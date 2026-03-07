@@ -15,6 +15,11 @@ export interface Amenity {
   distance: number; // meters from rental
   coords: [number, number]; // [lat, lng]
   isSmallBusiness?: boolean;
+  rating?: number;
+  walkMinutes?: number;
+  address?: string | null;
+  description?: string;
+  source?: string;
 }
 
 export interface RentalListing {
