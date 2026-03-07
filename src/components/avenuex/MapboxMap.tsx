@@ -28,7 +28,7 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
       style: "mapbox://styles/mapbox/streets-v12",
       center: [-79.3832, 43.6532],
       zoom: 14,
-      pitch: 35,
+      pitch: 45,
       bearing: -10,
       dragRotate: false,
       // Performance: disable antialiasing (big win on CPU-only machines)
@@ -51,7 +51,7 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         type: "fill-extrusion",
         minzoom: 14,
         paint: {
-          "fill-extrusion-color": "#d1d9e0",
+          "fill-extrusion-color": "#ede8dc",
           "fill-extrusion-height": ["get", "height"],
           "fill-extrusion-base": ["get", "min_height"],
           "fill-extrusion-opacity": 0.75,
@@ -108,7 +108,7 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         mapRef.current.flyTo({
           center: [listing.lng, listing.lat],
           zoom: 15,
-          pitch: 35,
+          pitch: 45,
           duration: 700,
           essential: true,
         });
