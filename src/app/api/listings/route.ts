@@ -127,8 +127,18 @@ async function loadListings(): Promise<Listing[]> {
   const raw = await readFile(filePath, "utf8");
   const items: RawListing[] = JSON.parse(raw);
 
+  // Bounds of the downtown Toronto teardrop visible on the map
+  const LAT_MIN = 43.617, LAT_MAX = 43.679;
+  const LNG_MIN = -79.432, LNG_MAX = -79.343;
+
   cachedListings = items
-    .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+    .filter(
+      (item) =>
+        Number.isFinite(item.lat) &&
+        Number.isFinite(item.lng) &&
+        item.lat! >= LAT_MIN && item.lat! <= LAT_MAX &&
+        item.lng! >= LNG_MIN && item.lng! <= LNG_MAX
+    )
     .map((item): Listing => {
       const monthlyRent = parsePrice(item.price);
       const city = extractCity(item.location);
@@ -190,7 +200,9 @@ async function loadListings(): Promise<Listing[]> {
         categoryScores: { foodDrink, health, groceryParks, education, emergency },
         incomeNeeded: computeIncomeNeeded(monthlyRent),
       };
-    });
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 50);
 
   return cachedListings;
 }

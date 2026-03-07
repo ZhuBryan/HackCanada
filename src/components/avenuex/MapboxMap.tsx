@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Listing } from "@/lib/avenuex-data";
@@ -20,6 +20,9 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
   listingsRef.current = listings;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const highlightDirtyRef = useRef(true);
+  const triggerHighlightRef = useRef<(() => void) | null>(null);
+  const [poisVisible, setPoisVisible] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -28,7 +31,7 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
 
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: "mapbox://styles/mapbox/streets-v12",
+      style: "mapbox://styles/sym7534/cmmgpkjan00a701qsb6jbchc8",
       center: [-79.3832, 43.6532],
       zoom: 14,
       pitch: 45,
@@ -49,38 +52,33 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         color: "#f5f0e8",
         "horizon-blend": 0.04,
       });
-      // 3D buildings — color driven by feature-state:
-      //   hover  → amber highlight
-      //   score >= 80 (great) → green
-      //   score >= 60 (medium) → yellow
-      //   default → light tan
+
+      // Mapbox Standard style doesn't expose "composite" at the top level —
+      // add it manually so our fill-extrusion and querySourceFeatures can use it.
+      if (!map.getSource("composite")) {
+        map.addSource("composite", {
+          type: "vector",
+          url: "mapbox://mapbox.mapbox-streets-v8",
+        });
+      }
+
       map.addLayer({
         id: "3d-buildings",
         source: "composite",
         "source-layer": "building",
         filter: ["==", "extrude", "true"],
         type: "fill-extrusion",
-        minzoom: 12,
+        minzoom: 10,
         paint: {
           "fill-extrusion-color": [
             "case",
-            // Dark green: score >= 85
-            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 85],
-            "#15803d",
-            // Light green: score >= 75
-            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 75],
-            "#4ade80",
-            // Yellow: score >= 65
-            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 65],
-            "#fbbf24",
-            // Orange: score >= 55
-            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 55],
-            "#f97316",
-            // Dark red: score >= 35 (minimum threshold — still worth considering)
-            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 35],
-            "#dc2626",
-            // Default (not a listing or below threshold)
-            "#ede8dc",
+            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 85], "#15803d",
+            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 75], "#4ade80",
+            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 65], "#fbbf24",
+            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 55], "#f97316",
+            [">=", ["coalesce", ["feature-state", "listingScore"], 0], 35], "#dc2626",
+
+            "#f6f5f4",
           ],
           "fill-extrusion-height": ["get", "height"],
           "fill-extrusion-base": ["get", "min_height"],
@@ -89,14 +87,13 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
       });
 
       // ── Listing building highlights ────────────────────────────────────────
-      // Query building features from source tiles geographically, then do
-      // point-in-polygon to find which building footprint contains each
-      // listing's lat/lng. This avoids the pitch/occlusion problem of
-      // screen-space queryRenderedFeatures.
+      // querySourceFeatures for geographic accuracy — avoids the pitch/occlusion
+      // problem of screen-space queryRenderedFeatures.
       const listingFeatureIds = new Set<string | number>();
 
       const applyListingHighlights = () => {
-        // Clear previous stamps
+        if (!highlightDirtyRef.current) return;
+        highlightDirtyRef.current = false;
         listingFeatureIds.forEach((id) => {
           map.setFeatureState(
             { source: "composite", sourceLayer: "building", id },
@@ -111,23 +108,28 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         });
 
         for (const listing of listingsRef.current) {
-          // Step 1: find the single nearest building feature
+          // Find nearest building — skip features outside a ~300m bbox first
+          const pad = 0.003;
           let nearest: (typeof buildingFeatures)[number] | null = null;
           let nearestDist = Infinity;
           for (const feature of buildingFeatures) {
             if (feature.id == null) continue;
+            const b = geomBounds(feature.geometry);
+            if (!b || b.maxLng < listing.lng - pad || b.minLng > listing.lng + pad ||
+                       b.maxLat < listing.lat - pad || b.minLat > listing.lat + pad) continue;
             const d = minDistToGeom(listing.lng, listing.lat, feature.geometry);
             if (d < nearestDist) { nearestDist = d; nearest = feature; }
           }
           if (!nearest) continue;
 
-          // Step 2: build a vertex key-set for the nearest building
-          // (5 decimal places ≈ 1 m precision — enough to detect shared edges)
+          // Stamp nearest + every building sharing a vertex with it (wider bbox)
           const anchorKeys = vertexKeySet(nearest.geometry, 5);
-
-          // Step 3: stamp nearest + every building that shares any vertex with it
+          const pad2 = 0.005;
           for (const feature of buildingFeatures) {
             if (feature.id == null) continue;
+            const b = geomBounds(feature.geometry);
+            if (!b || b.maxLng < listing.lng - pad2 || b.minLng > listing.lng + pad2 ||
+                       b.maxLat < listing.lat - pad2 || b.minLat > listing.lat + pad2) continue;
             const touches =
               feature.id === nearest.id ||
               vertexKeys(feature.geometry, 5).some((k) => anchorKeys.has(k));
@@ -142,12 +144,29 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         }
       };
 
+      // Debounce idle-triggered highlights so we don't run on partial tile loads
+      let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+      const scheduleHighlight = () => {
+        if (!highlightDirtyRef.current) return;
+        if (highlightTimer) clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(applyListingHighlights, 200);
+      };
+
+      triggerHighlightRef.current = () => {
+        highlightDirtyRef.current = true;
+        scheduleHighlight();
+      };
+
+      map.on("sourcedata", (e) => {
+        if (e.sourceId === "composite" && e.isSourceLoaded) {
+          highlightDirtyRef.current = true;
+        }
+      });
+
       applyListingHighlights();
-      map.on("idle", applyListingHighlights);
+      map.on("idle", scheduleHighlight);
 
       // ── GTA boundary mask ──────────────────────────────────────────────────
-      // Inverted polygon: world outer ring with a GTA-shaped hole cut out.
-      // Everything outside the hole renders as solid gray.
       map.addSource("gta-mask", {
         type: "geojson",
         data: {
@@ -156,24 +175,25 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
           geometry: {
             type: "Polygon",
             coordinates: [
-              // Outer ring: entire world (counter-clockwise)
               [[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]],
-              // Inner hole: downtown Toronto teardrop (clockwise)
               [
-                [-79.4130, 43.6750], // NW  — Bloor/Ossington
-                [-79.3950, 43.6790], // N   — Bloor/Spadina peak
-                [-79.3700, 43.6750], // NE  — Bloor/Yonge
-                [-79.3540, 43.6720], // NE  — Rosedale/DVP
-                [-79.3430, 43.6580], // E   — Don Valley
-                [-79.3480, 43.6450], // SE  — Broadview/Distillery
-                [-79.3580, 43.6320], // SE  — Lower Don
-                [-79.3750, 43.6200], // S   — Harbour
-                [-79.3930, 43.6170], // S   — south tip
-                [-79.4130, 43.6220], // SW  — Exhibition/Humber
-                [-79.4280, 43.6350], // W   — King/Dufferin
-                [-79.4320, 43.6500], // W   — Queen/Dufferin
-                [-79.4240, 43.6640], // NW  — Bloor/Dufferin
-                [-79.4130, 43.6750], // back to NW
+                [-79.3832, 43.7732],
+                [-79.3181, 43.7641],
+                [-79.2631, 43.7380],
+                [-79.2261, 43.6991],
+                [-79.2132, 43.6532],
+                [-79.2261, 43.6073],
+                [-79.2631, 43.5684],
+                [-79.3181, 43.5423],
+                [-79.3832, 43.5332],
+                [-79.4483, 43.5423],
+                [-79.5033, 43.5684],
+                [-79.5403, 43.6073],
+                [-79.5532, 43.6532],
+                [-79.5403, 43.6991],
+                [-79.5033, 43.7380],
+                [-79.4483, 43.7641],
+                [-79.3832, 43.7732],
               ],
             ],
           },
@@ -188,6 +208,21 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
           "fill-opacity": 1,
         },
       });
+
+      // ── Disable 3D facades so our fill-extrusion can render ──────────────────
+      // Standard style's show3dFacades renders opaque 3D building models on top
+      // of fill-extrusion layers, hiding our score-colored buildings.
+      // Disable Standard style's building renderers so only our fill-extrusion shows
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty("basemap", "show3dFacades", false);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty("basemap", "show3dBuildings", false);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty("basemap", "colorBuildings", "#f6f5f4");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty("basemap", "colorGreenspace", "#9cd397");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).setConfigProperty("basemap", "lightPreset", "day");
 
       // ── Markers ────────────────────────────────────────────────────────────
       for (const listing of listingsRef.current) {
@@ -226,6 +261,9 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
     markersRef.current.forEach((marker, id) => {
       applyMarkerStyle(marker.getElement(), id === selectedId);
     });
+
+    // Re-stamp building colors when listings change
+    triggerHighlightRef.current?.();
   }, [listings, selectedId]);
 
   // Update marker styles + fly when selectedId changes
@@ -248,6 +286,16 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
     }
   }, [selectedId, listings]);
 
+  // Toggle POI/transit labels via Mapbox Standard style config
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (map as any).setConfigProperty("basemap", "showPointOfInterestLabels", poisVisible);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (map as any).setConfigProperty("basemap", "showTransitLabels", poisVisible);
+  }, [poisVisible]);
+
   function addMarker(map: mapboxgl.Map, listing: Listing, active: boolean) {
     const el = document.createElement("div");
     el.style.cssText = markerBaseStyle(active, listing.score);
@@ -262,7 +310,18 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
     markersRef.current.set(listing.id, marker);
   }
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      <button
+        type="button"
+        onClick={() => setPoisVisible((v) => !v)}
+        className="absolute bottom-[88px] right-3 z-10 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md transition hover:bg-slate-50"
+      >
+        {poisVisible ? "Hide POIs" : "Show POIs"}
+      </button>
+    </div>
+  );
 }
 
 function markerBaseStyle(active: boolean, score: number): string {
@@ -299,18 +358,15 @@ function rings(geom: GeoJSON.Geometry): [number, number][][] {
   return [];
 }
 
-// Minimum geographic distance from point to a geometry (0 if inside).
 function minDistToGeom(px: number, py: number, geom: GeoJSON.Geometry): number {
   let min = Infinity;
   for (const ring of rings(geom)) {
-    // Inside check — distance is 0
     let inside = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const [xi, yi] = ring[i], [xj, yj] = ring[j];
       if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
     }
     if (inside) return 0;
-    // Edge distance
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const [x1, y1] = ring[j], [x2, y2] = ring[i];
       const dx = x2 - x1, dy = y2 - y1, lenSq = dx * dx + dy * dy;
@@ -321,11 +377,25 @@ function minDistToGeom(px: number, py: number, geom: GeoJSON.Geometry): number {
   return Math.sqrt(min);
 }
 
-// Returns a Set of "lng,lat" strings rounded to `decimals` places.
 function vertexKeySet(geom: GeoJSON.Geometry, decimals: number): Set<string> {
   return new Set(vertexKeys(geom, decimals));
 }
 
 function vertexKeys(geom: GeoJSON.Geometry, decimals: number): string[] {
   return rings(geom).flat().map(([vx, vy]) => `${vx.toFixed(decimals)},${vy.toFixed(decimals)}`);
+}
+
+function geomBounds(geom: GeoJSON.Geometry): { minLng: number; maxLng: number; minLat: number; maxLat: number } | null {
+  const r = rings(geom);
+  if (r.length === 0) return null;
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const ring of r) {
+    for (const [lng, lat] of ring) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+  }
+  return { minLng, maxLng, minLat, maxLat };
 }
