@@ -14,6 +14,9 @@ import type { FilterType, Listing } from "@/lib/avenuex-data";
 import UserMenu from "@/components/avenuex/UserMenu";
 import { useSavedListings } from "@/hooks/useSavedListings";
 import ChatPanel from "@/components/avenuex/ChatPanel";
+import UserPriorityPanel from "@/components/avenuex/UserPriorityPanel";
+import { usePreferences } from "@/hooks/usePreferences";
+import { computePersonalScore, deriveBand, deriveStatus } from "@/lib/score-utils";
 
 type SortMode = "recommended" | "price-asc" | "price-desc" | "score-desc";
 
@@ -51,6 +54,7 @@ export default function HeroPage() {
   const [sort, setSort] = useState<SortMode>("recommended");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { isSaved, toggleSave, savedIds, isLoggedIn } = useSavedListings();
+  const { preferences } = usePreferences();
 
   useEffect(() => {
     let cancelled = false;
@@ -74,8 +78,29 @@ export default function HeroPage() {
   }, []);
 
   const filteredListings = useMemo<Listing[]>(() => {
-    let items = listings;
+    // 1. Recalculate the vitality score based on user preferences
+    const weights = {
+      schools: preferences.w_schools,
+      groceries: preferences.w_groceries,
+      restaurants: preferences.w_restaurants,
+      cafes: preferences.w_cafes,
+      parks: preferences.w_parks,
+      pharmacies: preferences.w_pharmacies,
+      transit: preferences.w_transit,
+    };
 
+    let items = listings.map((l) => {
+      if (!l.nearbyServices) return l;
+      const score = computePersonalScore(l.nearbyServices, weights);
+      const scoreBand = deriveBand(score);
+      const scoreStatus = deriveStatus(scoreBand);
+      return { ...l, score, scoreBand, scoreStatus };
+    });
+
+    // 2. Filter by max rent from preferences
+    items = items.filter((l) => l.monthlyRent <= preferences.max_rent);
+
+    // 3. Search and text filters
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(
@@ -98,9 +123,10 @@ export default function HeroPage() {
       case "score-desc":
         return [...items].sort((a, b) => b.score - a.score);
       default:
+        // By default, sort by personalized vitality score
         return [...items].sort((a, b) => b.score - a.score);
     }
-  }, [listings, search, filter, sort]);
+  }, [listings, search, filter, sort, preferences]);
 
   const selectedListing = useMemo(
     () => (selectedId ? (listings.find((l) => l.id === selectedId) ?? null) : null),
@@ -121,8 +147,13 @@ export default function HeroPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* ── Left Sidebar ── */}
         <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-gray-200 bg-white">
+          {/* User Priority Panel */}
+          <div className="border-b border-gray-200 p-4 pb-2">
+            <UserPriorityPanel />
+          </div>
+
           {/* Filters */}
-          <div className="space-y-3 border-b border-gray-200 p-4">
+          <div className="space-y-3 border-b border-gray-200 p-4 pt-2">
             <div className="flex flex-wrap gap-1.5">
               {FILTER_OPTIONS.map((f) => (
                 <button
@@ -317,13 +348,13 @@ export default function HeroPage() {
                 ]
                   .filter(Boolean)
                   .map((m) => (
-                  <span
-                    key={m}
-                    className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
-                  >
-                    {m}
-                  </span>
-                ))}
+                    <span
+                      key={m}
+                      className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
+                    >
+                      {m}
+                    </span>
+                  ))}
               </div>
 
               {/* About */}
