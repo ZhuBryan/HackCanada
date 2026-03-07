@@ -1,4 +1,5 @@
 import type { ScoreBand } from "@/lib/avenuex-data";
+export type { ScoreBand };
 
 export const BUCKET_KEYS = [
     "schools",
@@ -23,13 +24,13 @@ export const BUCKET_LABELS: Record<BucketKey, string> = {
 };
 
 export const BUCKET_CAPS = {
-    schools: 5,
-    groceries: 5,
-    restaurants: 15,
-    cafes: 10,
-    parks: 5,
-    pharmacies: 5,
-    transit: 10,
+    schools: 15,
+    groceries: 15,
+    restaurants: 50,
+    cafes: 30,
+    parks: 15,
+    pharmacies: 10,
+    transit: 25,
 } as const;
 
 export interface Weights {
