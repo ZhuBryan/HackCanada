@@ -188,6 +188,18 @@ function looksLikeRealSchool(place: NearbyPlace): boolean {
   return /(school|academy|collegiate|institute|école|montessori|secondary|elementary|middle school|prep)/.test(text);
 }
 
+function looksLikeRealPharmacy(place: NearbyPlace): boolean {
+  const name = normalizeText(place.name);
+  const address = normalizeText(place.address);
+  const combined = `${name} ${address}`;
+
+  if (!name) return false;
+  if (/^\d+$/.test(name) || /^\d+\s/.test(name)) return false;
+  if (/(street|avenue|road|drive|boulevard|lane|court|crescent|way)$/.test(name)) return false;
+
+  return /(pharmacy|pharmacie|pharmasave|rexall|shoppers drug mart|drug mart|drugstore|drug market|guardian|apothecary|\bi\.?d\.?a\.?\b)/.test(combined);
+}
+
 function cleanedPlaces(bucket: NearbyBucket | undefined, category: NearbyCategory): NearbyPlace[] {
   const places = placesWithinRadius(bucket, category);
 
@@ -206,6 +218,14 @@ function cleanedPlaces(bucket: NearbyBucket | undefined, category: NearbyCategor
 
   if (category === "schools") {
     const filtered = places.filter(looksLikeRealSchool);
+    return dedupePlaces(
+      filtered,
+      (place) => normalizeText(place.address) || normalizeText(place.name),
+    );
+  }
+
+  if (category === "pharmacies") {
+    const filtered = places.filter(looksLikeRealPharmacy);
     return dedupePlaces(
       filtered,
       (place) => normalizeText(place.address) || normalizeText(place.name),
