@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useContext, createContext } from "react";
+import type { ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 
@@ -26,7 +27,21 @@ const DEFAULT_PREFS: UserPreferences = {
     max_rent: 3200,
 };
 
-export function usePreferences() {
+interface PreferencesContextValue {
+    preferences: UserPreferences;
+    savePreferences: (prefs: UserPreferences) => Promise<void>;
+    loading: boolean;
+    isLoggedIn: boolean;
+}
+
+const PreferencesContext = createContext<PreferencesContextValue>({
+    preferences: DEFAULT_PREFS,
+    savePreferences: async () => { },
+    loading: false,
+    isLoggedIn: false,
+});
+
+export function PreferencesProvider({ children }: { children: ReactNode }) {
     const { user } = useAuth();
     const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFS);
     const [loading, setLoading] = useState(false);
@@ -78,6 +93,14 @@ export function usePreferences() {
         [user]
     );
 
-    return { preferences, savePreferences, loading, isLoggedIn: !!user };
+    return (
+        <PreferencesContext.Provider value= {{ preferences, savePreferences, loading, isLoggedIn: !!user }
+}>
+    { children }
+    </PreferencesContext.Provider>
+    );
 }
 
+export function usePreferences() {
+    return useContext(PreferencesContext);
+}
