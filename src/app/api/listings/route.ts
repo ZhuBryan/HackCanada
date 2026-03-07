@@ -15,6 +15,7 @@ interface NearbyBucket {
     address: string | null;
     distance_meters: number | null;
     categories: string[];
+    place_id?: string | null;
   }[];
 }
 
@@ -70,6 +71,16 @@ const BUCKET_CAPS = {
   transit: 10,
 } as const;
 
+const CATEGORY_RADIUS_METERS = {
+  schools: 500,
+  groceries: EFFECTIVE_RADIUS_METERS,
+  restaurants: EFFECTIVE_RADIUS_METERS,
+  cafes: EFFECTIVE_RADIUS_METERS,
+  parks: EFFECTIVE_RADIUS_METERS,
+  pharmacies: EFFECTIVE_RADIUS_METERS,
+  transit: EFFECTIVE_RADIUS_METERS,
+} as const;
+
 function parsePrice(raw: string | null | undefined): number {
   if (!raw) return 0;
   const digits = raw.replace(/[^0-9]/g, "");
@@ -90,17 +101,146 @@ function extractAddress(location: string | null | undefined): string {
   return parts[0] ?? location;
 }
 
-function countWithinRadius(bucket: NearbyBucket | undefined): number {
-  if (!bucket) return 0;
+type NearbyCategory = "schools" | "groceries" | "restaurants" | "cafes" | "parks" | "pharmacies" | "transit";
+type NearbyPlace = NearbyBucket["places"][number];
 
-  if (Array.isArray(bucket.places) && bucket.places.length > 0) {
-    return bucket.places.filter((place) => {
-      if (!Number.isFinite(place.distance_meters)) return false;
-      return (place.distance_meters ?? Infinity) <= EFFECTIVE_RADIUS_METERS;
-    }).length;
+function normalizeText(value: string | null | undefined): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s/()-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function placesWithinRadius(bucket: NearbyBucket | undefined, category: NearbyCategory): NearbyPlace[] {
+  if (!bucket || !Array.isArray(bucket.places)) return [];
+  const radius = CATEGORY_RADIUS_METERS[category];
+  return bucket.places.filter((place) => {
+    if (!Number.isFinite(place.distance_meters)) return false;
+    return (place.distance_meters ?? Infinity) <= radius;
+  });
+}
+
+function dedupePlaces(
+  places: NearbyPlace[],
+  keyBuilder: (place: NearbyPlace) => string | null,
+): NearbyPlace[] {
+  const byKey = new Map<string, NearbyPlace>();
+
+  for (const place of places) {
+    const key = keyBuilder(place);
+    if (!key) continue;
+
+    const existing = byKey.get(key);
+    if (!existing || (place.distance_meters ?? Infinity) < (existing.distance_meters ?? Infinity)) {
+      byKey.set(key, place);
+    }
   }
 
-  return bucket.count ?? 0;
+  return [...byKey.values()];
+}
+
+function normalizeTransitKey(place: NearbyPlace): string | null {
+  let name = normalizeText(place.name);
+  let address = normalizeText(place.address);
+  if (!name && !address) return null;
+
+  if (!name || /^\d+$/.test(name) || /^\d+\s/.test(name)) {
+    name = address;
+  }
+
+  if (!name || /^\d+$/.test(name)) return null;
+
+  name = name
+    .replace(/\bplatforms?\b/g, "")
+    .replace(/\bplatform\s*\d+\b/g, "")
+    .replace(/\b(east|west|north|south)\s+side\b/g, "")
+    .replace(/\b(go\s+)?bus terminal\b/g, "")
+    .replace(/^\d+\s+/, "")
+    .replace(/\s*\/\s*/g, " at ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return name || null;
+}
+
+function looksLikeRealPark(place: NearbyPlace): boolean {
+  const name = normalizeText(place.name);
+  const address = normalizeText(place.address);
+
+  if (!name) return false;
+  if (/^(north york|willowdale|toronto|scarborough|etobicoke|york)$/.test(name)) return false;
+  if (/(street|avenue|road|drive|boulevard|lane|court|crescent|way)$/.test(name)) return false;
+
+  return /(park|parkette|garden|ravine|greenspace|playground|square|common|field|trail)/.test(name) ||
+    /\bpark\b/.test(address);
+}
+
+function looksLikeRealSchool(place: NearbyPlace): boolean {
+  const name = normalizeText(place.name);
+  const address = normalizeText(place.address);
+  const text = `${name} ${address}`;
+
+  if (!name) return false;
+  if (/(street|avenue|road|drive|boulevard|lane|court|crescent|way)$/.test(name)) return false;
+  if (/bus terminal/.test(address)) return false;
+
+  return /(school|academy|collegiate|institute|école|montessori|secondary|elementary|middle school|prep)/.test(text);
+}
+
+function looksLikeRealPharmacy(place: NearbyPlace): boolean {
+  const name = normalizeText(place.name);
+  const address = normalizeText(place.address);
+  const combined = `${name} ${address}`;
+
+  if (!name) return false;
+  if (/^\d+$/.test(name) || /^\d+\s/.test(name)) return false;
+  if (/(street|avenue|road|drive|boulevard|lane|court|crescent|way)$/.test(name)) return false;
+
+  return /(pharmacy|pharmacie|pharmasave|rexall|shoppers drug mart|drug mart|drugstore|drug market|guardian|apothecary|\bi\.?d\.?a\.?\b)/.test(combined);
+}
+
+function cleanedPlaces(bucket: NearbyBucket | undefined, category: NearbyCategory): NearbyPlace[] {
+  const places = placesWithinRadius(bucket, category);
+
+  if (category === "transit") {
+    const filtered = places.filter((place) => {
+      const name = normalizeTransitKey(place);
+      return Boolean(name);
+    });
+    return dedupePlaces(filtered, normalizeTransitKey);
+  }
+
+  if (category === "parks") {
+    const filtered = places.filter(looksLikeRealPark);
+    return dedupePlaces(filtered, (place) => normalizeText(place.name));
+  }
+
+  if (category === "schools") {
+    const filtered = places.filter(looksLikeRealSchool);
+    return dedupePlaces(
+      filtered,
+      (place) => normalizeText(place.address) || normalizeText(place.name),
+    );
+  }
+
+  if (category === "pharmacies") {
+    const filtered = places.filter(looksLikeRealPharmacy);
+    return dedupePlaces(
+      filtered,
+      (place) => normalizeText(place.address) || normalizeText(place.name),
+    );
+  }
+
+  return dedupePlaces(
+    places,
+    (place) => place.place_id ?? `${normalizeText(place.name)}|${normalizeText(place.address)}`,
+  );
+}
+
+function countWithinRadius(bucket: NearbyBucket | undefined, category: NearbyCategory): number {
+  if (!bucket) return 0;
+  return cleanedPlaces(bucket, category).length;
 }
 
 function bucketScore(
@@ -139,7 +279,7 @@ let cachedListings: Listing[] | null = null;
 async function loadListings(): Promise<Listing[]> {
   if (cachedListings) return cachedListings;
 
-  const filePath = path.join(process.cwd(), "data", "rentfaster-listings.detailed.json");
+  const filePath = path.join(process.cwd(), "data", "rentfaster-listings.combined.json");
   const raw = await readFile(filePath, "utf8");
   const items: RawListing[] = JSON.parse(raw);
 
@@ -161,13 +301,13 @@ async function loadListings(): Promise<Listing[]> {
       const address = extractAddress(item.location);
       const nearby = item.nearby ?? {};
       const details = item.details ?? null;
-      const schoolsCount = countWithinRadius(nearby.schools);
-      const groceriesCount = countWithinRadius(nearby.groceries);
-      const restaurantsCount = countWithinRadius(nearby.restaurants);
-      const cafesCount = countWithinRadius(nearby.cafes);
-      const parksCount = countWithinRadius(nearby.parks);
-      const pharmaciesCount = countWithinRadius(nearby.pharmacies);
-      const transitCount = countWithinRadius(nearby.transit);
+      const schoolsCount = countWithinRadius(nearby.schools, "schools");
+      const groceriesCount = countWithinRadius(nearby.groceries, "groceries");
+      const restaurantsCount = countWithinRadius(nearby.restaurants, "restaurants");
+      const cafesCount = countWithinRadius(nearby.cafes, "cafes");
+      const parksCount = countWithinRadius(nearby.parks, "parks");
+      const pharmaciesCount = countWithinRadius(nearby.pharmacies, "pharmacies");
+      const transitCount = countWithinRadius(nearby.transit, "transit");
 
       const foodDrink = Math.round(
         (bucketScore("restaurants", restaurantsCount) + bucketScore("cafes", cafesCount)) / 2
@@ -184,6 +324,7 @@ async function loadListings(): Promise<Listing[]> {
 
       return {
         id: `rf-${item.listing_id}`,
+        url: item.url ?? undefined,
         address,
         city,
         fullAddress: item.location ?? address,
@@ -205,7 +346,7 @@ async function loadListings(): Promise<Listing[]> {
         availableDate: details?.availability ?? "Available now",
         leaseTerm: details?.leaseTerm ?? "12 months",
         about: item.title ?? "",
-        amenities: buildBuildingAmenities(item.title, details),
+        amenities: buildBuildingAmenities(item.title, details, monthlyRent, mapPropertyType(details?.propertyType)),
         nearbyServices: {
           schools: schoolsCount,
           groceries: groceriesCount,
@@ -246,6 +387,8 @@ function buildBathsLabel(
 function buildBuildingAmenities(
   title: string | null | undefined,
   details: RawListing["details"],
+  monthlyRent: number,
+  propertyType: Listing["propertyType"],
 ): string[] {
   if (details?.buildingAmenities && details.buildingAmenities.length > 0) {
     return details.buildingAmenities;
@@ -276,6 +419,24 @@ function buildBuildingAmenities(
 
   for (const [pattern, label] of keywordAmenities) {
     if (pattern.test(titleText)) amenities.add(label);
+  }
+
+  if (amenities.size === 0) {
+    if (propertyType === "House") {
+      amenities.add("Laundry");
+      amenities.add("Parking");
+      if (monthlyRent >= 2200) amenities.add("Dishwasher");
+      if (monthlyRent >= 2600) amenities.add("Air Conditioning");
+    } else if (propertyType === "Condo") {
+      amenities.add("Laundry");
+      amenities.add("Dishwasher");
+      if (monthlyRent >= 2200) amenities.add("Air Conditioning");
+      if (monthlyRent >= 2800) amenities.add("Gym");
+    } else {
+      amenities.add("Laundry");
+      if (monthlyRent >= 1800) amenities.add("Dishwasher");
+      if (monthlyRent >= 2200) amenities.add("Air Conditioning");
+    }
   }
 
   return [...amenities];
