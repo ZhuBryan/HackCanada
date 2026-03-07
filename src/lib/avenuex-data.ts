@@ -33,6 +33,9 @@ export type Listing = {
     education: number;
     emergency: number;
   };
+  incomeNeeded?: number;
+  personalScore?: number;
+  matchReason?: string;
 };
 
 export const avenueNav = {
