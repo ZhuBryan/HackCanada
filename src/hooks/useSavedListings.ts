@@ -11,7 +11,7 @@ export function useSavedListings() {
 
     // Load saved listings when user signs in
     useEffect(() => {
-        if (!user) {
+        if (!user || !supabase) {
             setSavedIds(new Set());
             return;
         }
@@ -36,7 +36,7 @@ export function useSavedListings() {
 
     const toggleSave = useCallback(
         async (listingId: string) => {
-            if (!user) return;
+            if (!user || !supabase) return;
 
             if (savedIds.has(listingId)) {
                 // Remove
@@ -63,3 +63,4 @@ export function useSavedListings() {
 
     return { savedIds, isSaved, toggleSave, loading, isLoggedIn: !!user };
 }
+

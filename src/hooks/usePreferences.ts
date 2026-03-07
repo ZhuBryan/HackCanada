@@ -33,7 +33,7 @@ export function usePreferences() {
 
     // Load preferences when user signs in
     useEffect(() => {
-        if (!user) {
+        if (!user || !supabase) {
             setPreferences(DEFAULT_PREFS);
             return;
         }
@@ -64,7 +64,7 @@ export function usePreferences() {
     const savePreferences = useCallback(
         async (prefs: UserPreferences) => {
             setPreferences(prefs);
-            if (!user) return;
+            if (!user || !supabase) return;
 
             await supabase.from("user_preferences").upsert(
                 {
@@ -80,3 +80,4 @@ export function usePreferences() {
 
     return { preferences, savePreferences, loading, isLoggedIn: !!user };
 }
+
