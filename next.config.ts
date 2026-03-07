@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* Using webpack mode for Three.js compatibility */
 };
 
 export default nextConfig;

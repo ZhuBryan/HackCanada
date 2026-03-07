@@ -1,65 +1,188 @@
-import Image from "next/image";
+"use client";
+
+/**
+ * Avenue-X: Macro Search Map (Step 1)
+ *
+ * This is the landing page. Users view a 2D map of the city with rental pins.
+ * Clicking a pin transitions to the 3D Diorama (/diorama).
+ *
+ * Note: Requires NEXT_PUBLIC_MAPBOX_TOKEN in .env.local to load Mapbox tiles.
+ */
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Map, { Marker, Popup } from "react-map-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { MapPin, Building2, ChevronRight, Activity } from "lucide-react";
+
+// Mock data: A few rentals in Waterloo, ON
+const MOCK_PROPERTIES = [
+  {
+    id: "prop-1",
+    address: "123 University Ave W",
+    price: 2200,
+    lat: 43.4723,
+    lng: -80.5449,
+    score: 85, // Vitality Score
+    type: "Apartment",
+  },
+  {
+    id: "prop-2",
+    address: "45 Columbia St W",
+    price: 1850,
+    lat: 43.4761,
+    lng: -80.5376,
+    score: 62,
+    type: "House",
+  },
+  {
+    id: "prop-3",
+    address: "100 King St N",
+    price: 2600,
+    lat: 43.4643,
+    lng: -80.5204,
+    score: 94,
+    type: "Condo",
+  },
+];
 
 export default function Home() {
+  const router = useRouter();
+  const [selectedProperty, setSelectedProperty] = useState<
+    typeof MOCK_PROPERTIES[0] | null
+  >(null);
+
+  // Default viewport centered on Waterloo
+  const [viewState, setViewState] = useState({
+    longitude: -80.525,
+    latitude: 43.47,
+    zoom: 13,
+    pitch: 45,
+    bearing: -17.6,
+  });
+
+  const handleDive = (prop: typeof MOCK_PROPERTIES[0]) => {
+    // Navigate to 3D diorama with query params
+    const params = new URLSearchParams({
+      lat: prop.lat.toString(),
+      lng: prop.lng.toString(),
+      address: prop.address,
+      price: prop.price.toString(),
+    });
+    router.push(`/diorama?${params.toString()}`);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="relative w-screen h-screen overflow-hidden bg-black text-white">
+      {/* Mapbox Canvas */}
+      <Map
+        {...viewState}
+        onMove={(evt) => setViewState(evt.viewState)}
+        mapStyle="mapbox://styles/mapbox/dark-v11"
+        mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
+        style={{ width: "100%", height: "100%" }}
+      >
+        {/* Render Property Pins */}
+        {MOCK_PROPERTIES.map((prop) => (
+          <Marker
+            key={prop.id}
+            longitude={prop.lng}
+            latitude={prop.lat}
+            anchor="bottom"
+            onClick={(e) => {
+              e.originalEvent.stopPropagation(); // prevent map click
+              setSelectedProperty(prop);
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <div className="relative group cursor-pointer animate-bounce-slow">
+              <div className="absolute -inset-2 bg-blue-500/20 rounded-full blur-md opacity-0 group-hover:opacity-100 transition-opacity" />
+              <MapPin className="relative w-8 h-8 text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+            </div>
+          </Marker>
+        ))}
+
+        {/* Selected Property Popup */}
+        {selectedProperty && (
+          <Popup
+            longitude={selectedProperty.lng}
+            latitude={selectedProperty.lat}
+            anchor="top"
+            onClose={() => setSelectedProperty(null)}
+            closeButton={false}
+            className="z-50"
+            offset={[0, 10]}
           >
-            Documentation
-          </a>
+            {/* Custom styled popup content using Tailwind (overrides Mapbox defaults) */}
+            <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/50 rounded-xl p-4 shadow-2xl min-w-[280px] text-white">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-100">
+                    {selectedProperty.address}
+                  </h3>
+                  <p className="text-sm text-slate-400 flex items-center gap-1 mt-1">
+                    <Building2 className="w-3 h-3" /> {selectedProperty.type}
+                  </p>
+                </div>
+                <div className="bg-slate-800 rounded-lg px-2 py-1 border border-slate-700">
+                  <span className="text-lg font-black text-blue-400">
+                    ${selectedProperty.price}
+                  </span>
+                  <span className="text-xs text-slate-500 block text-right">
+                    /mo
+                  </span>
+                </div>
+              </div>
+
+              {/* Vitality Preview */}
+              <div className="bg-slate-800/50 rounded-lg p-3 mb-4 flex items-center justify-between border border-slate-700/50">
+                <span className="text-xs font-semibold tracking-wider text-slate-300 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  VITALITY SCORE
+                </span>
+                <span
+                  className={`text-xl font-bold ${
+                    selectedProperty.score >= 80
+                      ? "text-emerald-400"
+                      : selectedProperty.score >= 50
+                      ? "text-amber-400"
+                      : "text-red-400"
+                  }`}
+                >
+                  {selectedProperty.score}
+                </span>
+              </div>
+
+              {/* Dive Button */}
+              <button
+                onClick={() => handleDive(selectedProperty)}
+                className="w-full relative group overflow-hidden bg-blue-500 hover:bg-blue-400 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+                DIVE TO 3D DIORAMA
+                <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          </Popup>
+        )}
+      </Map>
+
+      {/* UI Overlay: Header */}
+      <div className="absolute top-6 left-6 z-10 pointer-events-none">
+        <h1 className="text-3xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-600 drop-shadow-md">
+          AVENUE-X
+        </h1>
+        <p className="text-sm font-semibold tracking-widest text-slate-400 uppercase mt-1 drop-shadow">
+          Select a property to scan
+        </p>
+      </div>
+
+      {/* No Token Warning */}
+      {!process.env.NEXT_PUBLIC_MAPBOX_TOKEN && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-red-500/90 text-white px-6 py-3 rounded-full font-bold shadow-lg border border-red-400 backdrop-blur-sm animate-pulse flex items-center gap-3">
+          <MapPin className="w-5 h-5" />
+          Missing NEXT_PUBLIC_MAPBOX_TOKEN in .env.local
         </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }
