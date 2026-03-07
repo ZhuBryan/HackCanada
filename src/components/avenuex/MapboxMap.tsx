@@ -68,7 +68,7 @@ export function MapboxMap({ listings, selectedId, onSelect }: MapboxMapProps) {
         "source-layer": "building",
         filter: ["==", "extrude", "true"],
         type: "fill-extrusion",
-        minzoom: 10,
+        minzoom: 14,
         paint: {
           "fill-extrusion-color": [
             "case",
