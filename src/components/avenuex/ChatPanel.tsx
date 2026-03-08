@@ -2,7 +2,6 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useSpiderPrefs, type SpiderAxes } from "@/lib/spider-prefs-context";
-import { SPIDER_CATEGORIES } from "./SpiderChart";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +15,51 @@ type ChatMsg = {
 };
 
 type OnboardingStep = "greeting" | "priorities" | null;
+
+function TypewriterText({ text, enabled }: { text: string; enabled: boolean }) {
+  const [shown, setShown] = useState(enabled ? "" : text);
+
+  useEffect(() => {
+    if (!enabled) {
+      setShown(text);
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (prefersReducedMotion) {
+        setShown(text);
+        return;
+      }
+    }
+
+    const chars = Array.from(text);
+    if (chars.length === 0) {
+      setShown("");
+      return;
+    }
+
+    let i = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const step = () => {
+      const chunk = Math.max(1, Math.ceil(chars.length / 36));
+      i = Math.min(chars.length, i + chunk);
+      setShown(chars.slice(0, i).join(""));
+      if (i < chars.length) {
+        timer = setTimeout(step, 18);
+      }
+    };
+
+    step();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, text]);
+
+  return <>{shown}</>;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -128,7 +172,8 @@ export default function ChatPanel() {
       const data = await res.json();
       if (data.prefUpdate) {
         setPrefs(data.prefUpdate as SpiderAxes);
-        append({ id: uid(), role: "assistant", content: data.content, prefUpdate: data.prefUpdate as SpiderAxes });
+        append({ id: uid(), role: "assistant", content: data.content });
+        append({ id: uid(), role: "assistant", content: "Refined search.", prefUpdate: data.prefUpdate as SpiderAxes });
       } else {
         append({ id: uid(), role: "assistant", content: data.content });
       }
@@ -140,63 +185,54 @@ export default function ChatPanel() {
 
   return (
     <>
-      {/* Message history panel — floats above the bar */}
+      {/* Message history — transparent overlay directly on map */}
       {chatOpen && (
         <div className="absolute inset-x-0 z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: 76 }}>
           <div
-            className="pointer-events-auto w-full max-w-2xl rounded-2xl border overflow-hidden flex flex-col"
-            style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--line)", boxShadow: "0 -8px 40px rgba(28,25,23,0.12)", maxHeight: 400 }}
+            className="w-full max-w-2xl flex flex-col"
+            style={{ maxHeight: "20vh" }}
           >
-            {/* Panel header */}
-            <div className="flex flex-shrink-0 items-center justify-between px-4 py-2.5" style={{ backgroundColor: "var(--brand)", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-              <div className="flex items-center gap-2">
-                <span className="text-sm">🌿</span>
-                <span className="font-display text-sm font-bold text-white">Canopi</span>
-              </div>
-              <button type="button" onClick={closeChat} className="text-white/60 hover:text-white transition text-lg leading-none px-1">×</button>
-            </div>
-
-            {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-              {messages.map((msg) => (
+            {/* Fade-out gradient mask at top */}
+            <div
+              ref={scrollRef}
+              className="pointer-events-auto overflow-y-auto px-1 pb-3 space-y-2"
+              style={{
+                maskImage: "linear-gradient(to bottom, transparent 0%, black 30%)",
+                WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 30%)",
+                scrollbarWidth: "none",
+              }}
+            >
+              {messages.map((msg, idx) => (
                 <div key={msg.id}>
                   <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div
-                      className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "rounded-br-md" : "border rounded-bl-md"}`}
-                      style={{ whiteSpace: "pre-wrap", backgroundColor: msg.role === "user" ? "var(--brand)" : "var(--surface-raised)", borderColor: msg.role === "user" ? undefined : "var(--line)", color: msg.role === "user" ? "white" : "var(--foreground)" }}
+                      className={`chat-bubble-enter max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "rounded-br-md" : "rounded-bl-md"}`}
+                      style={{ animationDelay: `${Math.min(280, idx * 35)}ms`, whiteSpace: "pre-wrap", backdropFilter: "blur(12px)", backgroundColor: msg.role === "user" ? "var(--brand)" : "rgba(250,248,245,0.82)", border: msg.role === "user" ? undefined : "1px solid rgba(231,227,222,0.6)", color: msg.role === "user" ? "white" : "var(--foreground)" }}
                     >
-                      {msg.content}
+                      <span className={msg.role === "assistant" ? "chat-text-reveal" : undefined}>
+                        <TypewriterText text={msg.content} enabled={msg.role === "assistant"} />
+                      </span>
                     </div>
                   </div>
 
-                  {/* Preference update card */}
+                  {/* Preference updated indicator */}
                   {msg.prefUpdate && (
-                    <div className="mt-2 mx-0.5 rounded-xl border p-3 space-y-1.5" style={{ borderLeftWidth: 3, borderLeftColor: "var(--brand)", borderColor: "var(--line)", backgroundColor: "var(--surface)" }}>
-                      {SPIDER_CATEGORIES.map(({ key, label, color }) => {
-                        const val = msg.prefUpdate![key];
-                        return (
-                          <div key={key} className="flex items-center gap-2">
-                            <div style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
-                            <span className="text-[11px] font-semibold w-[72px] flex-shrink-0" style={{ color: "var(--foreground)" }}>{label}</span>
-                            <span className="text-[11px]" style={{ color: "var(--muted)" }}>→</span>
-                            <span className="text-[11px] font-bold font-mono w-5 flex-shrink-0" style={{ color: "var(--foreground)" }}>{val}</span>
-                            <div className="flex-1 h-1 rounded-full" style={{ backgroundColor: "var(--line)", minWidth: 24 }}>
-                              <div style={{ width: `${val}%`, height: "100%", backgroundColor: color, borderRadius: 99 }} />
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="chat-bubble-enter mt-1.5 mx-0.5 flex items-center gap-1.5" style={{ animationDelay: `${Math.min(280, idx * 35 + 70)}ms` }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--brand)", flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span className="text-[11px] font-semibold" style={{ color: "var(--brand)" }}>Match scores updated</span>
                     </div>
                   )}
 
                   {/* Single-select pills */}
                   {msg.pills && (
                     <div className="mt-2 flex flex-wrap gap-1.5 ml-0.5">
-                      {msg.pills.map((pill) => (
+                      {msg.pills.map((pill, pillIdx) => (
                         <button key={pill} type="button"
                           onClick={() => onboardingStep === "greeting" ? handlePersonaSelect(pill) : handleConfirmPill(pill)}
-                          className="rounded-full border px-3 py-1 text-xs font-semibold transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                          style={{ borderColor: "var(--line)", color: "var(--foreground)", backgroundColor: "var(--surface-raised)" }}
+                          className="chat-pill-pop rounded-full border px-3 py-1 text-xs font-semibold transition hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                          style={{ borderColor: "var(--line)", color: "var(--foreground)", backgroundColor: "var(--surface-raised)", animationDelay: `${Math.min(320, idx * 35 + pillIdx * 45 + 70)}ms` }}
                         >{pill}</button>
                       ))}
                     </div>
@@ -206,20 +242,20 @@ export default function ChatPanel() {
                   {msg.multiPills && (
                     <div className="mt-2 ml-0.5">
                       <div className="flex flex-wrap gap-1.5 mb-2">
-                        {msg.multiPills.map((pill) => {
+                        {msg.multiPills.map((pill, pillIdx) => {
                           const active = pendingPriorities.includes(pill);
                           return (
                             <button key={pill} type="button" onClick={() => handlePriorityToggle(pill)}
-                              className="rounded-full border px-3 py-1 text-xs font-semibold transition"
-                              style={active ? { borderColor: "var(--brand)", backgroundColor: "var(--brand-soft)", color: "var(--brand-ink)" } : { borderColor: "var(--line)", color: "var(--foreground)", backgroundColor: "var(--surface-raised)" }}
+                              className="chat-pill-pop rounded-full border px-3 py-1 text-xs font-semibold transition"
+                              style={active ? { borderColor: "var(--brand)", backgroundColor: "var(--brand-soft)", color: "var(--brand-ink)", animationDelay: `${Math.min(380, idx * 35 + pillIdx * 45 + 70)}ms` } : { borderColor: "var(--line)", color: "var(--foreground)", backgroundColor: "var(--surface-raised)", animationDelay: `${Math.min(380, idx * 35 + pillIdx * 45 + 70)}ms` }}
                             >{pill}</button>
                           );
                         })}
                       </div>
                       {pendingPriorities.length > 0 && (
                         <button type="button" onClick={handlePrioritiesDone}
-                          className="rounded-full px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
-                          style={{ backgroundColor: "var(--brand)" }}
+                          className="chat-pill-pop rounded-full px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+                          style={{ backgroundColor: "var(--brand)", animationDelay: "140ms" }}
                         >Done →</button>
                       )}
                     </div>
@@ -229,7 +265,7 @@ export default function ChatPanel() {
 
               {loading && (
                 <div className="flex justify-start">
-                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md border px-4 py-3" style={{ borderColor: "var(--line)", backgroundColor: "var(--surface-raised)" }}>
+                  <div className="chat-bubble-enter flex items-center gap-1.5 rounded-2xl rounded-bl-md px-4 py-3" style={{ animationDelay: "40ms", backgroundColor: "rgba(250,248,245,0.75)", backdropFilter: "blur(8px)" }}>
                     {[0, 150, 300].map((d) => <span key={d} className="h-1.5 w-1.5 animate-bounce rounded-full" style={{ backgroundColor: "var(--muted-light)", animationDelay: `${d}ms` }} />)}
                   </div>
                 </div>

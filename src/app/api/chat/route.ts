@@ -9,10 +9,6 @@ interface ChatMessage {
     content: string;
 }
 
-interface NearbyBucket {
-    count: number;
-}
-
 interface RawListing {
     listing_id: string;
     url: string | null;
@@ -22,101 +18,26 @@ interface RawListing {
     photo: string | null;
     lat: number | null;
     lng: number | null;
-    nearby?: {
-        schools?: NearbyBucket;
-        groceries?: NearbyBucket;
-        restaurants?: NearbyBucket;
-        cafes?: NearbyBucket;
-        parks?: NearbyBucket;
-        pharmacies?: NearbyBucket;
-        transit?: NearbyBucket;
-    };
+    nearby?: Record<string, { count: number }>;
 }
 
-// ── Helpers (mirrored from suggestions route) ────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-const BUCKET_KEYS = [
-    "schools",
-    "groceries",
-    "restaurants",
-    "cafes",
-    "parks",
-    "pharmacies",
-    "transit",
-] as const;
-
-type BucketKey = (typeof BUCKET_KEYS)[number];
-
-const BUCKET_LABELS: Record<BucketKey, string> = {
-    schools: "Schools",
-    groceries: "Grocery",
-    restaurants: "Restaurants",
-    cafes: "Cafes",
-    parks: "Parks",
-    pharmacies: "Pharmacies",
-    transit: "Transit",
-};
+const BUCKET_KEYS = ["schools", "groceries", "restaurants", "cafes", "parks", "pharmacies", "transit"] as const;
 
 function parsePrice(raw: string | null | undefined): number {
     if (!raw) return 0;
-    const digits = raw.replace(/[^0-9]/g, "");
-    const n = parseInt(digits, 10);
+    const n = parseInt(raw.replace(/[^0-9]/g, ""), 10);
     return Number.isFinite(n) ? n : 0;
 }
 
 function extractAddress(location: string | null | undefined): string {
     if (!location) return "Unknown address";
-    const parts = location
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    return parts[0] ?? location;
+    return location.split(",").map((s) => s.trim()).filter(Boolean)[0] ?? location;
 }
 
 function computeIncomeNeeded(monthlyRent: number): number {
     return Math.round(((monthlyRent / 0.3) * 12) / 1000) * 1000;
-}
-
-interface Weights {
-    schools: number;
-    groceries: number;
-    restaurants: number;
-    cafes: number;
-    parks: number;
-    pharmacies: number;
-    transit: number;
-}
-
-function computePersonalScore(nearby: RawListing["nearby"], weights: Weights): number {
-    if (!nearby) return 0;
-    let weightedSum = 0;
-    let totalWeight = 0;
-    for (const key of BUCKET_KEYS) {
-        const w = weights[key];
-        if (w <= 0) continue;
-        const count = nearby[key]?.count ?? 0;
-        const normalized = Math.min(count, 5) / 5;
-        weightedSum += w * normalized;
-        totalWeight += w;
-    }
-    if (totalWeight === 0) return 0;
-    return Math.round((weightedSum / totalWeight) * 100);
-}
-
-function buildMatchReason(nearby: RawListing["nearby"], weights: Weights): string {
-    if (!nearby) return "No nearby data available";
-    const scored: { key: BucketKey; contribution: number }[] = [];
-    for (const key of BUCKET_KEYS) {
-        const w = weights[key];
-        const count = nearby[key]?.count ?? 0;
-        const normalized = Math.min(count, 5) / 5;
-        scored.push({ key, contribution: w * normalized });
-    }
-    scored.sort((a, b) => b.contribution - a.contribution);
-    const top = scored.slice(0, 2).filter((s) => s.contribution > 0);
-    if (top.length === 0) return "Limited data for your priorities";
-    const labels = top.map((s) => BUCKET_LABELS[s.key].toLowerCase());
-    return `Strong ${labels.join(" and ")} access`;
 }
 
 // ── Data loading ─────────────────────────────────────────────────────────────
@@ -129,119 +50,6 @@ async function loadRaw(): Promise<RawListing[]> {
     const raw = await readFile(filePath, "utf8");
     cachedRaw = JSON.parse(raw);
     return cachedRaw!;
-}
-
-// ── Keyword-based fallback ───────────────────────────────────────────────────
-
-const KEYWORD_MAP: Record<string, BucketKey> = {
-    school: "schools",
-    schools: "schools",
-    university: "schools",
-    college: "schools",
-    grocery: "groceries",
-    groceries: "groceries",
-    supermarket: "groceries",
-    restaurant: "restaurants",
-    restaurants: "restaurants",
-    dining: "restaurants",
-    food: "restaurants",
-    cafe: "cafes",
-    cafes: "cafes",
-    coffee: "cafes",
-    park: "parks",
-    parks: "parks",
-    green: "parks",
-    nature: "parks",
-    pharmacy: "pharmacies",
-    pharmacies: "pharmacies",
-    drugstore: "pharmacies",
-    health: "pharmacies",
-    transit: "transit",
-    subway: "transit",
-    bus: "transit",
-    train: "transit",
-    commute: "transit",
-    transportation: "transit",
-};
-
-function parseBudget(text: string): number | null {
-    // Match patterns like "under 2000", "below $2,500", "max 1800", "budget 2000",
-    // "$2000", "2000/mo"
-    const patterns = [
-        /(?:under|below|max(?:imum)?|budget|less than|up to)\s*\$?\s*([\d,]+)/i,
-        /\$([\d,]+)\s*(?:\/mo|per month|a month)?/i,
-        /([\d,]+)\s*(?:\/mo|per month|a month)/i,
-    ];
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) {
-            const num = parseInt(match[1].replace(/,/g, ""), 10);
-            if (Number.isFinite(num) && num > 0) return num;
-        }
-    }
-    return null;
-}
-
-function parseKeywords(text: string): BucketKey[] {
-    const lower = text.toLowerCase();
-    const found = new Set<BucketKey>();
-    for (const [keyword, bucket] of Object.entries(KEYWORD_MAP)) {
-        if (lower.includes(keyword)) found.add(bucket);
-    }
-    return Array.from(found);
-}
-
-async function fallbackResponse(lastMessage: string): Promise<string> {
-    const budget = parseBudget(lastMessage);
-    const priorities = parseKeywords(lastMessage);
-
-    const weights: Weights = {
-        schools: 5,
-        groceries: 5,
-        restaurants: 5,
-        cafes: 5,
-        parks: 5,
-        pharmacies: 5,
-        transit: 5,
-    };
-
-    // Boost matched priorities
-    for (const key of priorities) {
-        weights[key] = 9;
-    }
-
-    const rawListings = await loadRaw();
-
-    const scored = rawListings
-        .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
-        .map((item) => {
-            const monthlyRent = parsePrice(item.price);
-            const address = extractAddress(item.location);
-            const personalScore = computePersonalScore(item.nearby, weights);
-            const matchReason = buildMatchReason(item.nearby, weights);
-            const incomeNeeded = computeIncomeNeeded(monthlyRent);
-            return { address, monthlyRent, personalScore, matchReason, incomeNeeded, location: item.location };
-        })
-        .filter((l) => (budget ? l.monthlyRent <= budget : true))
-        .sort((a, b) => b.personalScore - a.personalScore)
-        .slice(0, 3);
-
-    if (scored.length === 0) {
-        return "I couldn't find listings matching your criteria. Try adjusting your budget or priorities, or use the Personalize panel for more control.";
-    }
-
-    const lines = scored.map(
-        (l, i) =>
-            `${i + 1}. **${l.address}** — $${l.monthlyRent.toLocaleString()}/mo (Income needed: $${Math.round(l.incomeNeeded / 1000)}K+) — ${l.matchReason}`
-    );
-
-    let intro = "Here are my top picks";
-    if (budget) intro += ` under $${budget.toLocaleString()}/mo`;
-    if (priorities.length > 0)
-        intro += ` prioritizing ${priorities.map((k) => BUCKET_LABELS[k].toLowerCase()).join(", ")}`;
-    intro += ":\n\n";
-
-    return intro + lines.join("\n") + "\n\nWant me to refine the search? You can also use the **Personalize** panel in the sidebar for full slider control.";
 }
 
 // ── Gemini path ──────────────────────────────────────────────────────────────
@@ -329,7 +137,7 @@ async function geminiResponse(messages: ChatMessage[]): Promise<GeminiResult> {
     }));
 
     const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
         {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -339,7 +147,7 @@ async function geminiResponse(messages: ChatMessage[]): Promise<GeminiResult> {
                 generationConfig: {
                     maxOutputTokens: 600,
                     temperature: 0.7,
-                    response_mime_type: "application/json",
+                    responseMimeType: "application/json",
                 },
             }),
         }
@@ -376,25 +184,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ role: "assistant", content: "Please send a message to get started!" });
         }
 
-        const lastUserMessage = messages.filter((m) => m.role === "user").pop()?.content ?? "";
-
-        let content = "";
-        let prefUpdate: Record<string, number> | null = null;
-
-        if (process.env.GEMINI_API_KEY) {
-            try {
-                const result = await geminiResponse(messages);
-                content = result.content;
-                prefUpdate = result.prefUpdate;
-            } catch (err) {
-                console.error("Gemini error, using fallback:", err);
-                content = await fallbackResponse(lastUserMessage);
-            }
-        } else {
-            content = await fallbackResponse(lastUserMessage);
-        }
-
-        return NextResponse.json({ role: "assistant", content, prefUpdate });
+        const result = await geminiResponse(messages);
+        return NextResponse.json({ role: "assistant", content: result.content, prefUpdate: result.prefUpdate });
     } catch (error) {
         console.error("Chat route error:", error);
         return NextResponse.json(

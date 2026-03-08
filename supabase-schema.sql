@@ -15,9 +15,13 @@ create table public.user_preferences (
   w_pharmacies int default 5 check (w_pharmacies between 0 and 10),
   w_transit int default 5 check (w_transit between 0 and 10),
   max_rent int default 3200,
+  spider_axes jsonb not null default '{"walkability":50,"nourishment":50,"wellness":50,"greenery":50,"buzz":50,"essentials":50,"safety":50,"transit":50}',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Migration: run this if the table already exists
+-- alter table user_preferences add column if not exists spider_axes jsonb not null default '{"walkability":50,"nourishment":50,"wellness":50,"greenery":50,"buzz":50,"essentials":50,"safety":50,"transit":50}';
 
 -- Bookmarked/saved listings
 create table public.saved_listings (
