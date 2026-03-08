@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase";
 
 export type SpiderAxes = {
   walkability: number;
@@ -53,10 +55,36 @@ export function SpiderPrefsProvider({ children }: { children: ReactNode }) {
   const [hasProfile, setHasProfile] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [widgetOpen, setWidgetOpen] = useState(false);
+  const { user } = useAuth();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load preferences from DB when user logs in
+  useEffect(() => {
+    if (!user || !supabase) return;
+    supabase
+      .from("user_preferences")
+      .select("spider_axes")
+      .eq("user_id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.spider_axes) {
+          setPrefsRaw(data.spider_axes as SpiderAxes);
+          setHasProfile(true);
+        }
+      });
+  }, [user]);
 
   const setPrefs = (p: SpiderAxes) => {
     setPrefsRaw(p);
     setHasProfile(true);
+    // Debounced save to DB (600ms — avoids spamming on drag)
+    if (!user || !supabase) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      supabase!
+        .from("user_preferences")
+        .upsert({ user_id: user.id, spider_axes: p }, { onConflict: "user_id" });
+    }, 600);
   };
 
   return (
