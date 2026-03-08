@@ -2,7 +2,6 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useSpiderPrefs, type SpiderAxes } from "@/lib/spider-prefs-context";
-import { SPIDER_CATEGORIES } from "./SpiderChart";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -128,7 +127,8 @@ export default function ChatPanel() {
       const data = await res.json();
       if (data.prefUpdate) {
         setPrefs(data.prefUpdate as SpiderAxes);
-        append({ id: uid(), role: "assistant", content: data.content, prefUpdate: data.prefUpdate as SpiderAxes });
+        append({ id: uid(), role: "assistant", content: data.content });
+        append({ id: uid(), role: "assistant", content: "Refined search.", prefUpdate: data.prefUpdate as SpiderAxes });
       } else {
         append({ id: uid(), role: "assistant", content: data.content });
       }
@@ -169,23 +169,13 @@ export default function ChatPanel() {
                     </div>
                   </div>
 
-                  {/* Preference update card */}
+                  {/* Preference updated indicator */}
                   {msg.prefUpdate && (
-                    <div className="mt-2 mx-0.5 rounded-xl border p-3 space-y-1.5" style={{ borderLeftWidth: 3, borderLeftColor: "var(--brand)", borderColor: "var(--line)", backgroundColor: "var(--surface)" }}>
-                      {SPIDER_CATEGORIES.map(({ key, label, color }) => {
-                        const val = msg.prefUpdate![key];
-                        return (
-                          <div key={key} className="flex items-center gap-2">
-                            <div style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
-                            <span className="text-[11px] font-semibold w-[72px] flex-shrink-0" style={{ color: "var(--foreground)" }}>{label}</span>
-                            <span className="text-[11px]" style={{ color: "var(--muted)" }}>→</span>
-                            <span className="text-[11px] font-bold font-mono w-5 flex-shrink-0" style={{ color: "var(--foreground)" }}>{val}</span>
-                            <div className="flex-1 h-1 rounded-full" style={{ backgroundColor: "var(--line)", minWidth: 24 }}>
-                              <div style={{ width: `${val}%`, height: "100%", backgroundColor: color, borderRadius: 99 }} />
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="mt-1.5 mx-0.5 flex items-center gap-1.5">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--brand)", flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span className="text-[11px] font-semibold" style={{ color: "var(--brand)" }}>Match scores updated</span>
                     </div>
                   )}
 
