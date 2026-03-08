@@ -30,14 +30,17 @@ function buildPoly(values: SpiderAxes, maxR: number, cx: number, cy: number) {
   }).join(" ");
 }
 
-function computeMatch(user: SpiderAxes, listing: SpiderAxes) {
-  let dot = 0, mU = 0, mL = 0;
+export function computeMatch(user: SpiderAxes, listing: SpiderAxes) {
+  let weightedSum = 0;
+  let totalWeight = 0;
   for (const { key } of SPIDER_CATEGORIES) {
-    const u = user[key] ?? 0, l = listing[key] ?? 0;
-    dot += u * l; mU += u * u; mL += l * l;
+    const w = user[key] ?? 0;
+    const val = listing[key] ?? 0;
+    weightedSum += w * val;
+    totalWeight += w;
   }
-  if (!mU || !mL) return 0;
-  return Math.round((dot / (Math.sqrt(mU) * Math.sqrt(mL))) * 100);
+  if (totalWeight === 0) return 0;
+  return Math.round(weightedSum / totalWeight);
 }
 
 interface Props {
