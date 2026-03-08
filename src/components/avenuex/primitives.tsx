@@ -84,7 +84,7 @@ export function DesktopNavbar({
       <button
         type="button"
         onClick={() => router.push("/")}
-        className="flex w-80 items-center justify-center gap-1 rounded-lg py-0.5"
+        className="flex w-80 items-center justify-start gap-1 rounded-lg py-0.5 pl-4"
       >
         <Image src="/canopi-logo.png" alt="Canopi" width={50} height={50} className="rounded-md ml-2" />
         <span className="font-display text-4xl font-bold" style={{ color: "var(--foreground)" }}>Canopi</span>
