@@ -63,7 +63,7 @@ export default function SavedPage() {
         <div className="flex h-screen flex-col overflow-hidden bg-white">
             <DesktopNavbar
                 searchPlaceholder={avenueNav.searchPlaceholder}
-                savedCount={savedIds.size}
+                savedCount={savedListings.length}
                 userMenu={<UserMenu />}
             />
 

@@ -486,7 +486,7 @@ function HeroPageInner() {
       {/* Navbar */}
       <DesktopNavbar
         searchPlaceholder={avenueNav.searchPlaceholder}
-        savedCount={savedIds.size}
+        savedCount={listings.filter(l => savedIds.has(l.id)).length}
         searchValue={search}
         onSearchValueChange={setSearch}
         userMenu={<UserMenu />}
