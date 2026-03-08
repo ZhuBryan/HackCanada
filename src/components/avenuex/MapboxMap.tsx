@@ -42,9 +42,10 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
 
     mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
+    const styleFromEnv = process.env.NEXT_PUBLIC_MAPBOX_STYLE;
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: "mapbox://styles/sym7534/cmmgpkjan00a701qsb6jbchc8",
+      style: styleFromEnv || "mapbox://styles/mapbox/standard",
       center: [-79.3832, 43.6532],
       zoom: 14,
       pitch: 45,
@@ -58,6 +59,16 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
     mapRef.current = map;
     map.touchZoomRotate.disableRotation();
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.on("error", (event) => {
+      const message = String(event.error?.message ?? event.error ?? "");
+      if (!message) return;
+      if (!message.toLowerCase().includes("style")) return;
+      try {
+        map.setStyle("mapbox://styles/mapbox/standard");
+      } catch {
+        // fallback attempt only
+      }
+    });
 
     map.on("load", () => {
       map.setFog({
