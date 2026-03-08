@@ -28,6 +28,8 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
+  const selectedIdRef = useRef<string | null>(selectedId);
+  selectedIdRef.current = selectedId;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const selectedAmenitiesRef = useRef(selectedAmenities);
@@ -36,6 +38,61 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
   const triggerHighlightRef = useRef<(() => void) | null>(null);
   const amenityPopupRef = useRef<mapboxgl.Popup | null>(null);
   const [poisVisible, setPoisVisible] = useState(false);
+
+  const renderAmenityPaths = () => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const source = map.getSource("amenity-paths") as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    const currentSelectedId = selectedIdRef.current;
+    const selectedListing = currentSelectedId
+      ? listingsRef.current.find((l) => l.id === currentSelectedId)
+      : null;
+    if (!selectedListing) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      amenityPopupRef.current?.remove();
+      return;
+    }
+
+    const features: GeoJSON.Feature[] = [];
+    for (const amenity of selectedAmenitiesRef.current) {
+      const [lat, lng] = amenity.coords;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const color = colorForAmenityType(amenity.type);
+
+      features.push({
+        type: "Feature",
+        properties: { color },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [selectedListing.lng, selectedListing.lat],
+            [lng, lat],
+          ],
+        },
+      });
+      features.push({
+        type: "Feature",
+        properties: {
+          id: amenity.id,
+          name: amenity.name,
+          distance: amenity.distance,
+          description: amenity.description ?? "",
+          color,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [lng, lat],
+        },
+      });
+    }
+
+    source.setData({
+      type: "FeatureCollection",
+      features,
+    });
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -321,6 +378,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
       for (const listing of listingsRef.current) {
         addMarker(map, listing, listing.id === selectedId);
       }
+      renderAmenityPaths();
     });
 
     return () => {
@@ -381,55 +439,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
   }, [selectedId, listings]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const source = map.getSource("amenity-paths") as mapboxgl.GeoJSONSource | undefined;
-    if (!source) return;
-
-    const selectedListing = selectedId ? listings.find((l) => l.id === selectedId) : null;
-    if (!selectedListing) {
-      source.setData({ type: "FeatureCollection", features: [] });
-      amenityPopupRef.current?.remove();
-      return;
-    }
-
-    const features: GeoJSON.Feature[] = [];
-    for (const amenity of selectedAmenitiesRef.current) {
-      const [lat, lng] = amenity.coords;
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      const color = colorForAmenityType(amenity.type);
-
-      features.push({
-        type: "Feature",
-        properties: { color },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [selectedListing.lng, selectedListing.lat],
-            [lng, lat],
-          ],
-        },
-      });
-      features.push({
-        type: "Feature",
-        properties: {
-          id: amenity.id,
-          name: amenity.name,
-          distance: amenity.distance,
-          description: amenity.description ?? "",
-          color,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [lng, lat],
-        },
-      });
-    }
-
-    source.setData({
-      type: "FeatureCollection",
-      features,
-    });
+    renderAmenityPaths();
   }, [selectedId, listings, selectedAmenities]);
 
   // Toggle POI/transit labels via Mapbox Standard style config

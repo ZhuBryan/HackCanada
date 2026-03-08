@@ -306,7 +306,12 @@ export default function HeroPage() {
   const [sort, setSort] = useState<SortMode>("recommended");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [liveAmenities, setLiveAmenities] = useState<LiveAmenity[]>([]);
+  const selectedIdRef = useRef<string | null>(selectedId);
   const { isSaved, toggleSave, savedIds, isLoggedIn } = useSavedListings();
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -369,6 +374,7 @@ export default function HeroPage() {
       return;
     }
 
+    const listingId = selectedListing.id;
     const controller = new AbortController();
     fetch(`/api/vitality?lat=${selectedListing.lat}&lng=${selectedListing.lng}`, {
       signal: controller.signal,
@@ -376,6 +382,7 @@ export default function HeroPage() {
       .then(async (response) => {
         if (!response.ok) throw new Error("Failed to load vitality");
         const payload = (await response.json()) as { amenities?: LiveAmenity[] };
+        if (selectedIdRef.current !== listingId) return;
         setLiveAmenities(Array.isArray(payload.amenities) ? payload.amenities : []);
       })
       .catch((error) => {

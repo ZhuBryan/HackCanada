@@ -289,33 +289,70 @@ async function geminiResponse(messages: ChatMessage[]): Promise<string> {
         parts: [{ text: m.content }],
     }));
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                system_instruction: { parts: [{ text: systemPrompt }] },
-                contents,
-                generationConfig: {
-                    maxOutputTokens: 500,
-                    temperature: 0.7,
-                },
-            }),
-        }
+    const listModelsRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        { method: "GET" },
     );
 
-    if (!res.ok) {
-        const text = await res.text();
-        console.error("Gemini API error:", text);
-        throw new Error("Gemini API request failed");
+    let discoveredModels: string[] = [];
+    if (listModelsRes.ok) {
+        const listPayload = await listModelsRes.json();
+        const models = Array.isArray(listPayload.models) ? listPayload.models : [];
+        discoveredModels = models
+            .filter(
+                (model: { name?: string; supportedGenerationMethods?: string[] }) =>
+                    Array.isArray(model.supportedGenerationMethods) &&
+                    model.supportedGenerationMethods.includes("generateContent") &&
+                    typeof model.name === "string",
+            )
+            .map((model: { name: string }) => model.name.replace(/^models\//, ""));
     }
 
-    const data = await res.json();
-    return (
-        data.candidates?.[0]?.content?.parts?.[0]?.text ??
-        "I'm not sure how to help with that."
-    );
+    const preferredOrder = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ];
+
+    const discoveredPreferred = preferredOrder.filter((model) => discoveredModels.includes(model));
+    const discoveredOther = discoveredModels.filter((model) => !discoveredPreferred.includes(model));
+    const modelsToTry = [...discoveredPreferred, ...discoveredOther];
+    if (modelsToTry.length === 0) modelsToTry.push(...preferredOrder);
+
+    let lastErrorText = "";
+
+    for (const model of modelsToTry) {
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    system_instruction: { parts: [{ text: systemPrompt }] },
+                    contents,
+                    generationConfig: {
+                        maxOutputTokens: 500,
+                        temperature: 0.7,
+                    },
+                }),
+            }
+        );
+
+        if (!res.ok) {
+            lastErrorText = await res.text();
+            console.error(`Gemini API error (${model}):`, lastErrorText);
+            continue;
+        }
+
+        const data = await res.json();
+        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (content) return content;
+    }
+
+    throw new Error(`Gemini API request failed across models. Last error: ${lastErrorText}`);
 }
 
 // ── OpenAI path ──────────────────────────────────────────────────────────────
