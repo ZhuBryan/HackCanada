@@ -77,6 +77,7 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         properties: {
           id: amenity.id,
           name: amenity.name,
+          type: amenity.type,
           distance: amenity.distance,
           description: amenity.description ?? "",
           color,
@@ -294,7 +295,8 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         const feature = event.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
         const props = feature.properties ?? {};
-        const title = String(props.name ?? "Amenity");
+        const title = String(props.name ?? "Nearby Shop");
+        const type = String(props.type ?? "other");
         const description = String(props.description ?? "Nearby option.");
         const distance = Number(props.distance ?? 0);
         const lngLat = feature.geometry.coordinates as [number, number];
@@ -303,14 +305,23 @@ export function MapboxMap({ listings, selectedId, onSelect, selectedAmenities = 
         amenityPopupRef.current = new mapboxgl.Popup({
           closeButton: true,
           closeOnClick: true,
-          maxWidth: "280px",
+          maxWidth: "300px",
         })
           .setLngLat(lngLat)
           .setHTML(
-            `<div style="font-family:Inter,sans-serif;color:#0f172a">
-              <div style="font-size:13px;font-weight:800;margin-bottom:4px">${escapeHtml(title)}</div>
-              <div style="font-size:11px;color:#475569;margin-bottom:6px">${escapeHtml(description)}</div>
-              <div style="font-size:11px;color:#334155">${Number.isFinite(distance) ? `${Math.round(distance)}m away` : "Distance unavailable"}</div>
+            `<div style="font-family:Inter,sans-serif;color:#0f172a;min-width:240px;max-width:280px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#ffffff;box-shadow:0 10px 24px rgba(2,6,23,0.16)">
+              <div style="padding:10px 12px;background:linear-gradient(135deg,#eff6ff 0%,#ecfdf5 100%);border-bottom:1px solid #dcfce7">
+                <div style="font-size:13px;font-weight:800;line-height:1.35;margin-bottom:3px">${escapeHtml(title)}</div>
+                <div style="font-size:11px;font-weight:700;color:#166534;text-transform:capitalize">${escapeHtml(formatAmenityType(type))}</div>
+              </div>
+              <div style="padding:10px 12px">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:7px">
+                  <span style="display:inline-block;font-size:11px;font-weight:700;background:#f1f5f9;color:#334155;padding:3px 8px;border-radius:999px">
+                    ${Number.isFinite(distance) ? `${Math.round(distance)}m away` : "Distance unavailable"}
+                  </span>
+                </div>
+                <div style="font-size:11px;color:#475569;line-height:1.45">${escapeHtml(description)}</div>
+              </div>
             </div>`,
           )
           .addTo(map);
@@ -516,6 +527,23 @@ function colorForAmenityType(type: string): string {
       return "#3B82F6";
     default:
       return "#38BDF8";
+  }
+}
+
+function formatAmenityType(type: string): string {
+  switch (type) {
+    case "grocery":
+      return "Grocery";
+    case "healthcare":
+      return "Healthcare";
+    case "cafe":
+      return "Cafe";
+    case "park":
+      return "Park";
+    case "transit":
+      return "Transit";
+    default:
+      return "Local shop";
   }
 }
 
