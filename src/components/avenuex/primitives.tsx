@@ -80,13 +80,13 @@ export function DesktopNavbar({
   const hasInput = typeof onSearchValueChange === "function";
 
   return (
-    <header className="flex h-14 items-center justify-between border-b pl-2 pr-8" style={{ borderColor: "var(--line)", backgroundColor: "var(--surface-raised)" }}>
+    <header className="flex h-16 items-center justify-between border-b pl-2 pr-8" style={{ borderColor: "var(--line)", backgroundColor: "var(--surface-raised)" }}>
       <button
         type="button"
         onClick={() => router.push("/")}
-        className="flex items-center rounded-lg px-1 py-0.5"
+        className="flex w-80 items-center justify-center gap-1 rounded-lg py-0.5"
       >
-        <Image src="/canopi-logo.png" alt="Canopi" width={50} height={50} className="rounded-md" />
+        <Image src="/canopi-logo.png" alt="Canopi" width={50} height={50} className="rounded-md ml-2" />
         <span className="font-display text-4xl font-bold" style={{ color: "var(--foreground)" }}>Canopi</span>
       </button>
       <div className="hidden h-9 w-[400px] items-center gap-2 rounded-full border px-4 text-sm md:flex" style={{ borderColor: "var(--line)", backgroundColor: "var(--surface)" }}>

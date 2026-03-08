@@ -227,9 +227,9 @@ export default function ChatPanel({ onSelectListing }: { onSelectListing?: (id: 
       {chatOpen && (
         <div className="absolute inset-x-0 z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: 76 }}>
           <div
-            className="w-full max-w-2xl flex flex-col overflow-hidden"
+            className="w-full max-w-3xl flex flex-col overflow-hidden"
             style={{
-              maxHeight: "20vh",
+              maxHeight: "30vh",
               maskImage: "linear-gradient(to bottom, transparent 0px, black 56px)",
               WebkitMaskImage: "linear-gradient(to bottom, transparent 0px, black 56px)",
             }}
@@ -288,7 +288,7 @@ export default function ChatPanel({ onSelectListing }: { onSelectListing?: (id: 
       {/* Persistent bottom chat bar */}
       <div className="absolute bottom-0 inset-x-0 z-40 flex justify-center px-4 pb-3 pointer-events-none">
         <div
-          className="pointer-events-auto w-full max-w-2xl rounded-2xl border flex items-center gap-3 px-4 py-3 transition-all duration-200"
+          className="pointer-events-auto w-full max-w-3xl rounded-2xl border flex items-center gap-3 px-4 py-3.5 transition-all duration-200"
           style={{
             backgroundColor: "rgba(250,248,245,0.97)",
             borderColor: chatOpen ? "var(--brand)" : "var(--line)",
