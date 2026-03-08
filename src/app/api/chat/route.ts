@@ -9,6 +9,11 @@ interface ChatMessage {
     content: string;
 }
 
+interface ChatRequest {
+    messages: ChatMessage[];
+    language?: "en" | "fr";
+}
+
 interface RawListing {
     listing_id: string;
     url: string | null;
@@ -50,7 +55,7 @@ async function loadRaw(): Promise<RawListing[]> {
 
 // ── Gemini path ──────────────────────────────────────────────────────────────
 
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(language: "en" | "fr" = "en"): Promise<string> {
     const rawListings = await loadRaw();
     const validListings = rawListings.filter(
         (item) => Number.isFinite(item.lat) && Number.isFinite(item.lng)
@@ -65,7 +70,13 @@ async function buildSystemPrompt(): Promise<string> {
         })
         .join("\n");
 
-    return `You are Canopi, a warm, perceptive AI assistant for a Toronto rental platform. You help renters find apartments and understand neighborhoods — but more importantly, you understand *people*.
+    const isEnglish = language === "en";
+
+    const greeting = isEnglish
+        ? "You are Canopi, a warm, perceptive AI assistant for a Toronto rental platform. You help renters find apartments and understand neighborhoods — but more importantly, you understand *people*."
+        : "Tu es Canopi, un assistant IA chaleureux et perspicace pour une plateforme de location à Toronto. Tu aides les locataires à trouver des appartements et à comprendre les quartiers — mais plus important encore, tu comprends les *gens*.";
+
+    return `${greeting}
 
 You MUST always respond with a valid JSON object in this exact shape:
 {
@@ -168,6 +179,9 @@ LISTING RECOMMENDATION RULES:
 ---
 
 TONE: Warm, perceptive, unhurried. You're not selling — you're helping someone figure out where they belong.
+
+LANGUAGE: Respond exclusively in ${isEnglish ? "English" : "French"}. All content, questions, and responses must be in this language only.
+
 Always return valid JSON — no markdown fences, no extra text outside the JSON.`;
 }
 
@@ -243,11 +257,11 @@ function extractCandidateText(data: unknown): { text: string; finishReason: stri
     return { text, finishReason };
 }
 
-async function geminiResponse(messages: ChatMessage[]): Promise<GeminiResult> {
+async function geminiResponse(messages: ChatMessage[], language: "en" | "fr" = "en"): Promise<GeminiResult> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("No Gemini API key");
 
-    const systemPrompt = await buildSystemPrompt();
+    const systemPrompt = await buildSystemPrompt(language);
 
     const contents = messages.map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
@@ -321,14 +335,16 @@ async function geminiResponse(messages: ChatMessage[]): Promise<GeminiResult> {
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
+        const body: ChatRequest = await request.json();
         const messages: ChatMessage[] = body.messages ?? [];
+        const language: "en" | "fr" = body.language ?? "en";
 
         if (messages.length === 0) {
-            return NextResponse.json({ role: "assistant", content: "Please send a message to get started!" });
+            const emptyMsg = language === "en" ? "Please send a message to get started!" : "Veuillez envoyer un message pour commencer!";
+            return NextResponse.json({ role: "assistant", content: emptyMsg });
         }
 
-        const result = await geminiResponse(messages);
+        const result = await geminiResponse(messages, language);
         return NextResponse.json({ role: "assistant", content: result.content, prefUpdate: result.prefUpdate });
     } catch (error) {
         console.error("Chat route error:", error);
