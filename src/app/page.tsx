@@ -491,6 +491,7 @@ export default function HeroPage() {
             onSelect={setSelectedId}
           />
           <PrefsWidget />
+          <ChatPanel />
         </div>
 
         {/* ── Right Detail Panel ── */}
@@ -689,8 +690,6 @@ export default function HeroPage() {
         )}
       </div>
 
-      {/* Chatbot Panel */}
-      <ChatPanel />
     </div>
     </SpiderPrefsProvider>
   );
