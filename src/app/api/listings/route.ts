@@ -54,11 +54,28 @@ interface RawListing {
     pharmacies?: NearbyBucket;
     transit?: NearbyBucket;
   };
+  details?: {
+    bedsMin: number | null;
+    bedsMax: number | null;
+    bedsLabel: string | null;
+    bathsMin: number | null;
+    bathsMax: number | null;
+    bathsLabel?: string | null;
+    sqft: number | null;
+    pets: "pets_ok" | "cats_ok" | "dogs_ok" | "no_pets" | null;
+    availability: string | null;
+    leaseTerm?: string | null;
+    propertyType: string | null;
+    utilitiesIncluded?: string[];
+    features?: string[];
+    buildingAmenities?: string[];
+  } | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const EFFECTIVE_RADIUS_METERS = 1000;
+const MIN_REASONABLE_MONTHLY_RENT = 500;
 
 const BUCKET_CAPS = {
   schools: 5,
@@ -185,16 +202,14 @@ let cachedListings: Listing[] | null = null;
 async function loadListings(): Promise<Listing[]> {
   if (cachedListings) return cachedListings;
 
-  const filePath = path.join(process.cwd(), "data", "rentfaster-listings.merged.json");
+  const filePath = path.join(process.cwd(), "data", "rentfaster-listings.combined.json");
   const raw = await readFile(filePath, "utf8");
   const items: RawListing[] = JSON.parse(raw);
 
   cachedListings = items
-    .filter((item) => {
-      const lat = parseNum(item.lat);
-      const lng = parseNum(item.lng);
-      return lat !== 0 && lng !== 0;
-    })
+    .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+    .filter((item) => Boolean(item.url))
+    .filter((item) => parsePrice(item.price) >= MIN_REASONABLE_MONTHLY_RENT)
     .map((item): Listing => {
       const monthlyRent = parsePrice(item.price);
       const city = extractCity(item);
@@ -204,6 +219,7 @@ async function loadListings(): Promise<Listing[]> {
 
       // Vitality scoring from nearby data (if enriched data is present)
       const nearby = item.nearby ?? {};
+      const details = item.details ?? null;
       const schoolsCount = countWithinRadius(nearby.schools);
       const groceriesCount = countWithinRadius(nearby.groceries);
       const restaurantsCount = countWithinRadius(nearby.restaurants);
@@ -237,34 +253,115 @@ async function loadListings(): Promise<Listing[]> {
 
       return {
         id: `rf-${item.listing_id}`,
+        url: item.url ?? undefined,
         address,
         city,
         fullAddress: item.location ?? address,
         monthlyRent,
         priceLabel: `$${monthlyRent.toLocaleString()}/mo`,
         shortPrice: formatShortPrice(monthlyRent),
-        beds: parseNum(item.beds),
-        baths: parseNum(item.baths),
-        sqft: parseNum(item.sqft),
-        propertyType: mapPropertyType(item.property_type),
+        beds: details?.bedsMin ?? (/studio/i.test(details?.bedsLabel ?? "") ? 0 : 1),
+        baths: details?.bathsMin ?? 1,
+        sqft: details?.sqft ?? 0,
+        propertyType: mapPropertyType(details?.propertyType),
         score,
         scoreStatus: deriveStatus(scoreBand),
         scoreBand,
         image: item.photo ?? "",
         pinX: "50%",
         pinY: "50%",
-        lat,
-        lng,
-        availableDate: item.availability ?? "Available now",
-        leaseTerm: item.lease_term ?? "12 months",
+        lat: item.lat!,
+        lng: item.lng!,
+        availableDate: details?.availability ?? "Available now",
+        leaseTerm: details?.leaseTerm ?? "12 months",
         about: item.title ?? "",
-        amenities: buildAmenities(item, nearbyCounts),
+        amenities: buildBuildingAmenities(item.title, details),
+        nearbyServices: {
+          schools: schoolsCount,
+          groceries: groceriesCount,
+          restaurants: restaurantsCount,
+          cafes: cafesCount,
+          parks: parksCount,
+          pharmacies: pharmaciesCount,
+          transit: transitCount,
+        },
         categoryScores: { foodDrink, health, groceryParks, education, emergency },
+        bedsLabel: details?.bedsLabel ?? undefined,
+        bathsLabel: details?.bathsLabel ?? buildBathsLabel(details?.bathsMin, details?.bathsMax),
         incomeNeeded: computeIncomeNeeded(monthlyRent),
       };
-    });
+    })
+    .sort((a, b) => b.score - a.score);
 
   return cachedListings;
+}
+
+function mapPropertyType(raw: string | null | undefined): Listing["propertyType"] {
+  const normalized = (raw ?? "").toLowerCase();
+  if (normalized.includes("condo")) return "Condo";
+  if (normalized.includes("house") || normalized.includes("town")) return "House";
+  return "Apartment";
+}
+
+function buildBathsLabel(
+  bathsMin: number | null | undefined,
+  bathsMax: number | null | undefined,
+): string | undefined {
+  if (!Number.isFinite(bathsMin) && !Number.isFinite(bathsMax)) return undefined;
+  if (bathsMin === bathsMax) return `${bathsMin} ba`;
+  return `${bathsMin ?? bathsMax} - ${bathsMax ?? bathsMin} ba`;
+}
+
+function buildBuildingAmenities(
+  title: string | null | undefined,
+  details: RawListing["details"],
+): string[] {
+  if (details?.buildingAmenities && details.buildingAmenities.length > 0) {
+    return details.buildingAmenities;
+  }
+
+  const amenities = new Set<string>();
+  const titleText = (title ?? "").toLowerCase();
+
+  if (details?.pets === "pets_ok") amenities.add("Pet-friendly");
+  if (details?.pets === "cats_ok") amenities.add("Cats OK");
+  if (details?.pets === "dogs_ok") amenities.add("Dogs OK");
+  if (details?.pets === "no_pets") amenities.add("No pets");
+
+  const keywordAmenities: Array<[RegExp, string]> = [
+    [/\bparking\b/i, "Parking"],
+    [/\blaundry\b/i, "Laundry"],
+    [/\bwasher\b/i, "Laundry"],
+    [/\bgym\b/i, "Gym"],
+    [/\bfitness\b/i, "Gym"],
+    [/\bpool\b/i, "Pool"],
+    [/\bbalcony\b/i, "Balcony"],
+    [/\bdishwasher\b/i, "Dishwasher"],
+    [/\bair conditioning\b|\ba\/c\b/i, "A/C"],
+    [/\bstorage\b/i, "Storage"],
+    [/\bconcierge\b/i, "Concierge"],
+    [/\brooftop\b/i, "Rooftop deck"],
+  ];
+
+  for (const [pattern, label] of keywordAmenities) {
+    if (pattern.test(titleText)) amenities.add(label);
+  }
+
+  return [...amenities];
+}
+
+function buildAmenityLabels(
+  counts: Partial<Record<keyof typeof BUCKET_CAPS, number>>,
+): string[] {
+  const labels: string[] = [];
+  if ((counts.schools ?? 0) > 0) labels.push(`${counts.schools} schools nearby (1km)`);
+  if ((counts.groceries ?? 0) > 0) labels.push(`${counts.groceries} grocery stores (1km)`);
+  if ((counts.restaurants ?? 0) > 0) labels.push(`${counts.restaurants} restaurants (1km)`);
+  if ((counts.cafes ?? 0) > 0) labels.push(`${counts.cafes} cafes (1km)`);
+  if ((counts.parks ?? 0) > 0) labels.push(`${counts.parks} parks (1km)`);
+  if ((counts.pharmacies ?? 0) > 0) labels.push(`${counts.pharmacies} pharmacies (1km)`);
+  if ((counts.transit ?? 0) > 0) labels.push(`${counts.transit} transit stops (1km)`);
+  return labels;
 }
 
 // ── Route handler ────────────────────────────────────────────────────────────

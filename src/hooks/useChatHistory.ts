@@ -17,7 +17,7 @@ export function useChatHistory() {
 
     // Load chat history when user signs in
     useEffect(() => {
-        if (!user) {
+        if (!user || !supabase) {
             setMessages([]);
             setHistoryId(null);
             return;
@@ -43,7 +43,7 @@ export function useChatHistory() {
     const saveMessages = useCallback(
         async (msgs: ChatMessage[]) => {
             setMessages(msgs);
-            if (!user) return;
+            if (!user || !supabase) return;
 
             if (historyId) {
                 await supabase
@@ -70,10 +70,11 @@ export function useChatHistory() {
 
     const clearHistory = useCallback(async () => {
         setMessages([]);
-        if (!user || !historyId) return;
+        if (!user || !supabase || !historyId) return;
         await supabase.from("chat_history").delete().eq("id", historyId);
         setHistoryId(null);
     }, [user, historyId]);
 
     return { messages, saveMessages, clearHistory, loading, isLoggedIn: !!user };
 }
+

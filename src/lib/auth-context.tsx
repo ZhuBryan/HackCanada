@@ -29,8 +29,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!supabase) {
+            setSession(null);
+            setUser(null);
+            setLoading(false);
+            return;
+        }
+
         // Get initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
             setSession(session);
             setUser(session?.user ?? null);
             setLoading(false);
@@ -39,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Listen for auth changes
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
             setSession(session);
             setUser(session?.user ?? null);
             setLoading(false);
@@ -49,16 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const signUp = useCallback(async (email: string, password: string) => {
+        if (!supabase) return { error: "Supabase is not configured" };
         const { error } = await supabase.auth.signUp({ email, password });
         return { error: error?.message ?? null };
     }, []);
 
     const signIn = useCallback(async (email: string, password: string) => {
+        if (!supabase) return { error: "Supabase is not configured" };
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         return { error: error?.message ?? null };
     }, []);
 
     const signInWithGoogle = useCallback(async () => {
+        if (!supabase) return;
         await supabase.auth.signInWithOAuth({
             provider: "google",
             options: { redirectTo: `${window.location.origin}` },
@@ -66,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const signOut = useCallback(async () => {
+        if (!supabase) return;
         await supabase.auth.signOut();
     }, []);
 
