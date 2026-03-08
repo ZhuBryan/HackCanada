@@ -20,6 +20,21 @@ const OVERPASS_ENDPOINTS = [
   "https://lz4.overpass-api.de/api/interpreter",
 ];
 
+type OverpassElement = {
+  id: number | string;
+  lat?: number;
+  lon?: number;
+  center?: {
+    lat?: number;
+    lon?: number;
+  };
+  tags?: Record<string, string | undefined>;
+};
+
+type OverpassResponse = {
+  elements: OverpassElement[];
+};
+
 function describeAmenity(type: Amenity["type"], distance: number): string {
   const walk = Math.max(1, Math.round(distance / 80));
   switch (type) {
@@ -59,7 +74,7 @@ function fallbackNameForType(type: Amenity["type"]): string {
   }
 }
 
-async function fetchOverpassJson(query: string): Promise<any> {
+async function fetchOverpassJson(query: string): Promise<OverpassResponse> {
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6500);
@@ -69,7 +84,7 @@ async function fetchOverpassJson(query: string): Promise<any> {
         cache: "no-store",
       });
       if (!response.ok) continue;
-      return await response.json();
+      return (await response.json()) as OverpassResponse;
     } catch {
       // Try next mirror.
     } finally {
@@ -134,10 +149,10 @@ export async function GET(request: Request) {
       const maxPossibleScore = 180; // Slightly higher cap due to broader category coverage
 
       const amenities: Amenity[] = data.elements
-        .map((el: any): Amenity | null => {
+        .map((el: OverpassElement): Amenity | null => {
           if (!el.tags) return null;
-          const amenityLat = typeof el.lat === "number" ? el.lat : el.center?.lat;
-          const amenityLng = typeof el.lon === "number" ? el.lon : el.center?.lon;
+          const amenityLat = Number(typeof el.lat === "number" ? el.lat : el.center?.lat);
+          const amenityLng = Number(typeof el.lon === "number" ? el.lon : el.center?.lon);
           if (!Number.isFinite(amenityLat) || !Number.isFinite(amenityLng)) return null;
 
           // Determine type based on OSM tags
