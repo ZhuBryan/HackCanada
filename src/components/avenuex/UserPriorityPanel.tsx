@@ -94,7 +94,7 @@ export default function UserPriorityPanel() {
               <input
                 type="range"
                 min={0}
-                max={10}
+                max={100}
                 step={1}
                 value={localWeights[key]}
                 onChange={(e) => handleSliderChange(key, parseInt(e.target.value, 10))}
