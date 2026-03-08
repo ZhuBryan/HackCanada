@@ -212,11 +212,65 @@ h4 {
   }
 }
 
+/* ── Intro screen animations ─────────────────────────────── */
+
+.intro-blur-in {
+  opacity: 0;
+  filter: blur(24px);
+  animation: intro-blur-reveal 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes intro-blur-reveal {
+  0% {
+    opacity: 0;
+    filter: blur(24px);
+    transform: translateY(12px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(6px);
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: translateY(0);
+  }
+}
+
+.intro-pulse {
+  animation: intro-pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes intro-pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.intro-trail-enter {
+  animation: intro-trail-fade 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes intro-trail-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-bubble-enter,
-  .chat-pill-pop {
+  .chat-pill-pop,
+  .intro-blur-in,
+  .intro-pulse,
+  .intro-trail-enter {
     animation: none;
     opacity: 1;
     transform: none;
+    filter: none;
   }
 }

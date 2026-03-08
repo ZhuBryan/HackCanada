@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapboxMap } from "@/components/avenuex/MapboxMap";
 import {
   DesktopNavbar,
@@ -16,6 +16,8 @@ import { useSavedListings } from "@/hooks/useSavedListings";
 import ChatPanel from "@/components/avenuex/ChatPanel";
 import SpiderChart, { SPIDER_CATEGORIES, computeMatch } from "@/components/avenuex/SpiderChart";
 import { SpiderPrefsProvider, useSpiderPrefs, type SpiderAxes } from "@/lib/spider-prefs-context";
+import IntroScreen from "@/components/avenuex/IntroScreen";
+import WelcomePopup from "@/components/avenuex/WelcomePopup";
 
 type SortMode = "recommended" | "price-asc" | "price-desc" | "score-desc";
 
@@ -842,9 +844,27 @@ function HeroPageInner() {
 }
 
 export default function HeroPage() {
+  const [introComplete, setIntroComplete] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  const handleIntroComplete = useCallback(() => {
+    setIntroComplete(true);
+    // Show welcome popup shortly after fade-in
+    setTimeout(() => setShowWelcome(true), 600);
+  }, []);
+
   return (
     <SpiderPrefsProvider>
-      <HeroPageInner />
+      {!introComplete && <IntroScreen onComplete={handleIntroComplete} />}
+      <div
+        className={`transition-opacity duration-700 ${
+          introComplete ? "opacity-100" : "opacity-0"
+        }`}
+        style={{ pointerEvents: introComplete ? "auto" : "none" }}
+      >
+        <HeroPageInner />
+      </div>
+      {showWelcome && <WelcomePopup onDismiss={() => setShowWelcome(false)} />}
     </SpiderPrefsProvider>
   );
 }
