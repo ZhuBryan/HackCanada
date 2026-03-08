@@ -847,8 +847,16 @@ export default function HeroPage() {
   const [introComplete, setIntroComplete] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
 
+  // Skip intro if already seen this session
+  useEffect(() => {
+    if (sessionStorage.getItem("introComplete") === "true") {
+      setIntroComplete(true);
+    }
+  }, []);
+
   const handleIntroComplete = useCallback(() => {
     setIntroComplete(true);
+    sessionStorage.setItem("introComplete", "true");
     // Show welcome popup shortly after fade-in
     setTimeout(() => setShowWelcome(true), 600);
   }, []);
