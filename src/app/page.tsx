@@ -30,20 +30,37 @@ function PrefsWidget() {
   const { prefs, setPrefs, widgetOpen, openWidget, closeWidget, openChat } = useSpiderPrefs();
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<{ key: keyof SpiderAxes; i: number } | null>(null);
-  const prefsRef = useRef(prefs);
-  prefsRef.current = prefs;
+  const draggingRef = useRef(dragging);
+  draggingRef.current = dragging;
+
+  const [localPrefs, setLocalPrefs] = useState<SpiderAxes>(prefs);
+  const localPrefsRef = useRef(localPrefs);
+  localPrefsRef.current = localPrefs;
 
   const SZ = 220, CX = 110, CY = 110, MR = 78;
   const STEP = 360 / 8;
   const RINGS = [25, 50, 75, 100];
 
+  // Sync with global prefs if we aren't dragging
+  useEffect(() => {
+    if (!dragging) {
+      setLocalPrefs(prefs);
+    }
+  }, [prefs, dragging]);
+
   // Global mouseup / touchend to end drag
   useEffect(() => {
-    const end = () => setDragging(null);
+    const end = () => {
+      if (draggingRef.current) {
+        // Commit local changes to global context
+        setPrefs(localPrefsRef.current);
+      }
+      setDragging(null);
+    };
     window.addEventListener("mouseup", end);
     window.addEventListener("touchend", end);
     return () => { window.removeEventListener("mouseup", end); window.removeEventListener("touchend", end); };
-  }, []);
+  }, [setPrefs]);
 
   const getValFromEvent = (clientX: number, clientY: number, i: number) => {
     if (!svgRef.current) return null;
@@ -58,13 +75,13 @@ function PrefsWidget() {
   const onSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!dragging) return;
     const val = getValFromEvent(e.clientX, e.clientY, dragging.i);
-    if (val !== null) setPrefs({ ...prefsRef.current, [dragging.key]: val });
+    if (val !== null) setLocalPrefs({ ...localPrefsRef.current, [dragging.key]: val });
   };
 
   const onSvgTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
     if (!dragging || !e.touches[0]) return;
     const val = getValFromEvent(e.touches[0].clientX, e.touches[0].clientY, dragging.i);
-    if (val !== null) setPrefs({ ...prefsRef.current, [dragging.key]: val });
+    if (val !== null) setLocalPrefs({ ...localPrefsRef.current, [dragging.key]: val });
   };
 
   const startDrag = (key: keyof SpiderAxes, i: number, e: React.MouseEvent | React.TouchEvent) => {
@@ -73,7 +90,7 @@ function PrefsWidget() {
   };
 
   const polyPts = SPIDER_CATEGORIES.map(({ key }, i) => {
-    const { x, y } = pxy(i * STEP, ((prefs[key] ?? 0) / 100) * MR, CX, CY);
+    const { x, y } = pxy(i * STEP, ((localPrefs[key] ?? 0) / 100) * MR, CX, CY);
     return `${x},${y}`;
   }).join(" ");
 
@@ -130,7 +147,7 @@ function PrefsWidget() {
             {SPIDER_CATEGORIES.find(c => c.key === dragging.key)?.label}
           </span>
           <span className="text-[11px] font-bold font-mono" style={{ color: "var(--brand-ink)" }}>
-            {prefs[dragging.key]}
+            {localPrefs[dragging.key]}
           </span>
         </div>
       )}
@@ -189,7 +206,7 @@ function PrefsWidget() {
 
           {/* Draggable data points */}
           {SPIDER_CATEGORIES.map(({ key, color }, i) => {
-            const r = ((prefs[key] ?? 0) / 100) * MR;
+            const r = ((localPrefs[key] ?? 0) / 100) * MR;
             const { x, y } = pxy(i * STEP, r, CX, CY);
             const isActive = dragging?.key === key;
             return (
