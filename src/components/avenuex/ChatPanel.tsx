@@ -75,7 +75,7 @@ function uid() { return Math.random().toString(36).slice(2, 9); }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function ChatPanel() {
+export default function ChatPanel({ onSelectListing }: { onSelectListing?: (id: string) => void }) {
   const { hasProfile, setPrefs, chatOpen, openChat, closeChat } = useSpiderPrefs();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -212,6 +212,9 @@ export default function ChatPanel() {
         append({ id: uid(), role: "assistant", content: data.content });
       }
       speakText(data.content);
+      if (data.listingIds?.length) {
+        onSelectListing?.(data.listingIds[0]);
+      }
     } catch { append({ id: uid(), role: "assistant", content: language === "en" ? "Sorry, something went wrong." : "Désolé, quelque chose s'est mal passé." }); }
     finally { setLoading(false); }
   };
@@ -224,18 +227,20 @@ export default function ChatPanel() {
       {chatOpen && (
         <div className="absolute inset-x-0 z-40 flex justify-center px-4 pointer-events-none" style={{ bottom: 76 }}>
           <div
-            className="w-full max-w-2xl flex flex-col"
-            style={{ maxHeight: "20vh" }}
+            className="w-full max-w-2xl flex flex-col overflow-hidden"
+            style={{
+              maxHeight: "20vh",
+              maskImage: "linear-gradient(to bottom, transparent 0px, black 56px)",
+              WebkitMaskImage: "linear-gradient(to bottom, transparent 0px, black 56px)",
+            }}
           >
-            {/* Fade-out gradient mask at top */}
+            {/* Scrollable message list */}
             <div
               ref={scrollRef}
               className="pointer-events-auto overflow-y-auto px-1 pb-3 space-y-2"
               style={{
-                maskImage: "linear-gradient(to bottom, transparent 0px, black 48px)",
-                WebkitMaskImage: "linear-gradient(to bottom, transparent 0px, black 48px)",
                 scrollbarWidth: "none",
-                paddingTop: 48,
+                paddingTop: 56,
               }}
             >
               {messages.map((msg, idx) => (

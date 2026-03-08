@@ -81,7 +81,8 @@ async function buildSystemPrompt(language: "en" | "fr" = "en"): Promise<string> 
 You MUST always respond with a valid JSON object in this exact shape:
 {
   "content": "<your natural language reply here>",
-  "prefUpdate": { "walkability": 0-100, "nourishment": 0-100, "wellness": 0-100, "greenery": 0-100, "buzz": 0-100, "essentials": 0-100, "safety": 0-100, "transit": 0-100 } | null
+  "prefUpdate": { "walkability": 0-100, ... } | null,
+  "listingIds": ["rf-123", "rf-456"] | null
 }
 
 ---
@@ -116,6 +117,11 @@ Use indirect, lifestyle-revealing questions that expose values without asking ab
 - "What's the last neighborhood you visited and genuinely liked the vibe of?"
 
 Listen for *character signals*, not just keywords. Someone who says "I love slow mornings with good coffee and a walk" is revealing greenery + nourishment + walkability even without mentioning any of those words. Someone who says "I moved around a lot as a kid and never felt settled" might be signaling a deep need for safety and community.
+
+HANDLING HUMOR AND ABSURDITY: When someone gives a joke, weird, or unhinged answer — LEAN IN. Match their chaotic energy, riff on what they said, and extract lifestyle signals from it anyway. "DESTROYING HOUSES" → they're high-energy, probably extroverted, buzz-seeker. Acknowledge the bit, laugh about it, then move forward. NEVER sanitize or ignore a funny answer by restating the question as if they didn't say anything. That kills the vibe. Examples:
+- "DESTROYING HOUSES" → "Okay demolition crew, noted. I'm reading: high energy, needs a neighborhood that can match the chaos. So when you're NOT leveling structures, what's the vibe — dive bar with friends, or a park where you can decompress?"
+- "I eat air" → "Breatharian lifestyle, very niche. That's either a very expensive juice habit or you're the one person who doesn't need to be near food — but I doubt it. What's actually your go-to when you're hungry?"
+- "I sleep 20 hours a day" → "Respect. That's a very specific optimization. What fills the other 4?"
 
 After 2–3 exchanges, you should have enough texture to start making confident, personalized inferences.
 
@@ -173,7 +179,8 @@ LISTING RECOMMENDATION RULES:
 2. Frame recommendations as conclusions from the conversation: "Based on what you've told me, here's what I think actually fits you..."
 3. For location queries, use lat/lng to find closest listings.
 4. Toronto landmarks: CN Tower (43.643, -79.387), Union Station (43.645, -79.381), U of T (43.663, -79.396), King & Spadina (43.644, -79.396).
-5. Format listings as: "**[Address]** — $X,XXX/mo (Income needed: $XXK+)"
+5. Format listings as: "**[Address]** — $X,XXX/mo"
+6. Always populate listingIds with the rf-XXXXX IDs of any listings you mention. Set to null if no listings are referenced.
 6. After recommending, briefly explain *why* each listing fits their personality — not just their checklist.
 
 ---
@@ -188,6 +195,7 @@ Always return valid JSON — no markdown fences, no extra text outside the JSON.
 interface GeminiResult {
     content: string;
     prefUpdate: Record<string, number> | null;
+    listingIds: string[] | null;
 }
 
 function normalizePrefUpdate(value: unknown): Record<string, number> | null {
@@ -221,12 +229,14 @@ function parseGeminiJson(raw: string): GeminiResult | null {
     const tryParse = (candidate: string): GeminiResult | null => {
         try {
             const parsed = JSON.parse(candidate);
+            const ids = parsed?.listingIds;
             return {
                 content:
                     typeof parsed?.content === "string" && parsed.content.trim()
                         ? parsed.content
                         : "I'm not sure how to help with that.",
                 prefUpdate: normalizePrefUpdate(parsed?.prefUpdate),
+                listingIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : null,
             };
         } catch {
             return null;
@@ -277,13 +287,18 @@ async function geminiResponse(messages: ChatMessage[], language: "en" | "fr" = "
                 system_instruction: { parts: [{ text: systemPrompt }] },
                 contents,
                 generationConfig: {
-                    maxOutputTokens: 4000,
+                    maxOutputTokens: 8000,
                     temperature: 0.4,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: "OBJECT",
                         properties: {
                             content: { type: "STRING" },
+                            listingIds: {
+                                type: "ARRAY",
+                                nullable: true,
+                                items: { type: "STRING" },
+                            },
                             prefUpdate: {
                                 type: "OBJECT",
                                 nullable: true,
@@ -299,7 +314,7 @@ async function geminiResponse(messages: ChatMessage[], language: "en" | "fr" = "
                                 },
                             },
                         },
-                        required: ["content", "prefUpdate"],
+                        required: ["content", "prefUpdate", "listingIds"],
                     },
                 },
             }),
@@ -318,17 +333,11 @@ async function geminiResponse(messages: ChatMessage[], language: "en" | "fr" = "
     if (parsed) return parsed;
 
     if (finishReason === "MAX_TOKENS") {
-        return {
-            content: "That response got cut off. Ask again and I'll keep it shorter.",
-            prefUpdate: null,
-        };
+        return { content: "That response got cut off. Ask again and I'll keep it shorter.", prefUpdate: null, listingIds: null };
     }
 
     console.warn("Gemini JSON parse fallback used", { finishReason, preview: raw.slice(0, 160) });
-    return {
-        content: "I hit a formatting issue on that response. Please try again.",
-        prefUpdate: null,
-    };
+    return { content: "I hit a formatting issue on that response. Please try again.", prefUpdate: null, listingIds: null };
 }
 
 // ── Route handler ────────────────────────────────────────────────────────────
@@ -345,7 +354,7 @@ export async function POST(request: Request) {
         }
 
         const result = await geminiResponse(messages, language);
-        return NextResponse.json({ role: "assistant", content: result.content, prefUpdate: result.prefUpdate });
+        return NextResponse.json({ role: "assistant", content: result.content, prefUpdate: result.prefUpdate, listingIds: result.listingIds });
     } catch (error) {
         console.error("Chat route error:", error);
         return NextResponse.json(

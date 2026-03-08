@@ -561,7 +561,7 @@ function HeroPageInner() {
             selectedAmenities={selectedId && liveAmenitiesForListingId === selectedId ? liveAmenities : []}
           />
           <PrefsWidget />
-          <ChatPanel />
+          <ChatPanel onSelectListing={setSelectedId} />
         </div>
 
         {/* ── Right Detail Panel ── */}
